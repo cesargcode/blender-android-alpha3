@@ -1,0 +1,152 @@
+name: Diagnostico de capacidade do runner
+
+on:
+  workflow_dispatch:
+
+# No checkout or GitHub API calls: the job token needs no permissions.
+permissions: {}
+
+jobs:
+  capacidade:
+    name: Medir recursos e ferramentas (sem build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Registrar inventario somente leitura
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+
+          # Only predefined, read-only probes run here. No environment dump,
+          # repository checkout, package installation, cleanup, cache or upload.
+          probe() {
+            local label="$1"
+            shift
+            printf '\n### %s\n\n```text\n' "$label" >> "$GITHUB_STEP_SUMMARY"
+            local status=0
+            timeout 30s "$@" >> "$GITHUB_STEP_SUMMARY" 2>&1 || status=$?
+            if [ "$status" -ne 0 ]; then
+              printf '\nConsulta indisponivel/incompleta (codigo %s).\n' "$status" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            printf '```\n' >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          version() {
+            local label="$1"
+            local executable="$2"
+            shift 2
+            if command -v "$executable" > /dev/null 2>&1; then
+              probe "$label" "$executable" "$@"
+            else
+              printf '\n### %s\n\nNao encontrado no PATH.\n' "$label" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          }
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          # Capacidade observada do runner
+
+          Execucao manual de diagnostico em `ubuntu-24.04`, com limite de 10 minutos.
+          As medicoes pertencem somente a esta maquina e a este instante.
+          **100 GiB e uma margem de planejamento, nao o consumo medido do Blender.**
+          O sucesso deste diagnostico nao aprova nem inicia a compilacao completa.
+          Nenhum pacote sera instalado, nenhuma pasta sera removida e nenhum APK sera compilado.
+
+          O runner e o padrao hospedado pelo GitHub, sem selecao de larger runner.
+          Em repositorio publico, runners padrao sao gratuitos. Em privado, consumo e eventual
+          cobranca dependem da franquia/plano/orcamento do proprietario, ainda nao verificados.
+          SUMMARY
+
+          probe 'Data UTC' date -u '+%Y-%m-%dT%H:%M:%SZ'
+          probe 'Arquitetura' uname -m
+          probe 'CPUs logicas disponiveis ao processo' nproc
+          probe 'CPU' lscpu
+          probe 'RAM e swap' free -h
+          probe 'RAM em bytes' free -b
+          probe 'Disco: raiz e workspace' df -hT / "$GITHUB_WORKSPACE"
+          probe 'Disco em bytes: raiz e workspace' df -B1 --output=size,used,avail,target / "$GITHUB_WORKSPACE"
+
+          available_bytes="$(df -B1 --output=avail "$GITHUB_WORKSPACE" 2>/dev/null | awk 'NR == 2 {print $1}')" || available_bytes=""
+          margin_bytes=$((100 * 1024 * 1024 * 1024))
+          printf '\n### Comparacao com a margem de planejamento\n\n' >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$available_bytes" =~ ^[0-9]+$ ]]; then
+            available_gib="$(awk -v bytes="$available_bytes" 'BEGIN {printf "%.2f", bytes / 1073741824}')"
+            printf 'Espaco livre observado no workspace: **%s GiB** (%s bytes).\n\n' "$available_gib" "$available_bytes" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$available_bytes" -ge "$margin_bytes" ]; then
+              printf 'A margem de 100 GiB esta disponivel agora; isso nao demonstra que o build cabe ou termina.\n' >> "$GITHUB_STEP_SUMMARY"
+            else
+              printf 'A margem de 100 GiB nao esta disponivel agora; isso nao mede quanto o build realmente precisa.\n' >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            printf 'Nao foi possivel obter o espaco livre em bytes; capacidade de disco inconclusiva.\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          printf '\nLinhas de df podem representar o mesmo filesystem; nao some seus espacos.\n' >> "$GITHUB_STEP_SUMMARY"
+
+          version 'JDK: java' java -version
+          version 'JDK: javac' javac -version
+          version 'Clang' clang --version
+          version 'Clang C++' clang++ --version
+          version 'CMake' cmake --version
+          version 'Ninja' ninja --version
+
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          if command -v sdkmanager > /dev/null 2>&1; then
+            probe 'Android sdkmanager' sdkmanager --version
+          elif [ -x "$sdk_root/cmdline-tools/latest/bin/sdkmanager" ]; then
+            probe 'Android sdkmanager' "$sdk_root/cmdline-tools/latest/bin/sdkmanager" --version
+          else
+            printf '\n### Android sdkmanager\n\nNao encontrado; nenhuma instalacao foi feita.\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -d "$sdk_root/ndk" ]; then
+            probe 'Revisoes NDK presentes (nomes de diretorios)' find "$sdk_root/ndk" -mindepth 1 -maxdepth 1 -type d -printf '%f\n'
+          else
+            printf '\n### Revisoes NDK presentes\n\nDiretorio de NDK nao encontrado.\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+
+          ## Pastas pre-instaladas para avaliar em uma eventual limpeza
+
+          Apenas tamanho ocupado, em bytes; nada sera apagado. Esta lista nao autoriza limpeza.
+          Pastas podem compartilhar arquivos ou dependencias: nao some os tamanhos como espaco recuperavel.
+          `du` usa blocos ocupados, limita-se a um filesystem e tem limite de 30 segundos por consulta.
+          Uma consulta incompleta ou sem permissao nao equivale a tamanho zero.
+          O SDK Android e medido separadamente como ferramenta a preservar para o futuro build.
+          SUMMARY
+
+          candidates=(
+            /usr/share/dotnet
+            /usr/local/.ghcup
+            /opt/ghc
+            /usr/local/share/powershell
+            /usr/share/swift
+            /usr/local/share/chromium
+            /opt/hostedtoolcache
+          )
+          for directory in "${candidates[@]}"; do
+            if [ -d "$directory" ]; then
+              probe "Tamanho: $directory" du -sx -B1 -D -- "$directory"
+            else
+              printf '\n### Tamanho: %s\n\nDiretorio ausente nesta imagem.\n' "$directory" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          if [ -d "$sdk_root" ]; then
+            probe 'Tamanho do SDK Android (preservar)' du -sx -B1 -D -- "$sdk_root"
+          fi
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+
+          ## Proxima decisao
+
+          Revisar CPU, RAM, disco livre e versoes antes de desenhar o build.
+          O diagnostico nao resolve a falta do codigo-fonte completo nem mede o pico de disco/RAM
+          de dependencias, link, empacotamento ou assinatura. A compilacao completa precisa de
+          um workflow separado, revisado depois deste relatorio e das condicoes da conta.
+
+          Fontes de custos e runners:
+          - https://docs.github.com/en/billing/concepts/product-billing/github-actions
+          - https://docs.github.com/en/actions/reference/runners/github-hosted-runners
+          SUMMARY
+          printf 'Diagnostico concluido. Consulte o Summary desta execucao.\n'
