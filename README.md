@@ -6,18 +6,28 @@ a coexistência dos modificadores físicos e virtuais, a limpeza após perda de
 foco ou desconexão e a entrega de texto do teclado físico aos campos do Blender.
 Mantém a configuração Full e a base gráfica.
 
-**Ainda não há instalador disponível ou comportamento validado no aparelho.**
-A [quarta execução](https://github.com/cesargcode/blender-android-alpha3/actions/runs/40695500313)
-compilou a configuração Full anterior à correção de texto e montou um APK de
-cerca de 272 MB. A verificação final falhou ao procurar `sdkVersion` no relatório
-que usava `minSdkVersion`; o APK não foi retido. O verificador foi corrigido e o
-workflow atualizado tenta preservar APK e relatórios em uma release de rascunho,
-inclusive se a validação falhar. As novas alterações de texto ainda precisam de
-compilação Android, assinatura e teste no aparelho.
+**APK Full compilado, inspecionado e assinado em 28/10/2026. O funcionamento no
+aparelho ainda não foi testado.** O instalador entregue localmente, separado
+do repositório e do draft do GitHub, é
+`blender-alpha3-modificadores-full-arm64-signed.apk`, com 287.065.402 bytes e SHA-256:
+
+```text
+c7aa70e957ec911a738432d6f8b0b74a9f96cc217a46353222496924bc207ea9
+```
+
+A [sexta execução](https://github.com/cesargcode/blender-android-alpha3/actions/runs/40731216675)
+concluiu Full, Java/DEX/APK e suas verificações, com envio confirmado dos 16
+arquivos. A inspeção local encontrou duas dependências glTF ausentes e acrescentou
+`libdraco.so` e `libmeshoptimizer.so` da revisão Android fixada, sem recompilar
+ou modificar o conteúdo das entradas originais. O pacote completo passou em
+610 verificações estáticas, também aprovadas no APK final assinado; a assinatura v3 e o alinhamento com `zipalign -P 16`
+foram verificados. O APK original do GitHub foi preservado e tem hash diferente
+do instalador assinado; seu unsigned não está pronto para instalar. A
+[receita](build/README.md) registra essa distinção.
 
 - [Patch](blender-alpha3-modificadores.patch): nove arquivos alterados sobre a base fixada.
 - [Receita de compilação](build/README.md): Ubuntu 24.04 x64, saída unsigned por padrão.
-- [Testes](tests/README.md): 629 verificações nativas, 45 do teclado virtual, 72 Java e 6 JNI aprovadas no host com interfaces simuladas.
+- [Testes](tests/README.md): 752 verificações locais aprovadas — 629 nativas, 45 do teclado virtual, 72 Java e 6 JNI — com interfaces simuladas.
 - [Capacidade](CAPACIDADE.md): medições de fontes, bibliotecas e NDK, com limites conhecidos.
 - [Licença](LICENSE): texto GPL fornecido pelo projeto original.
 
@@ -31,10 +41,11 @@ compilação ou chaves de assinatura. A receita obtém a fonte completa e as
 dependências públicas nas revisões identificadas. Exclui apenas os dados Git LFS
 em `tests/**`; arquivos de runtime, assets e código normal são preservados.
 
-O APK unsigned, se o build terminar, precisará ser assinado localmente com uma
-chave estável antes de poder ser instalado. Uma assinatura diferente da usada
-em uma instalação existente impede a atualização direta. A receita não altera
-nenhum dispositivo Android.
+O instalador exige Android 12 ou superior e ARM64. Sua chave é própria: uma
+assinatura diferente da instalação existente impede a atualização direta.
+Faça backup dos projetos e configurações antes de reinstalar; remover o
+aplicativo pode apagar seus dados privados. Novas saídas unsigned da receita
+precisam de inspeção e assinatura antes da instalação.
 
 O caminho físico consulta `KeyCharacterMap` do dispositivo para obter Unicode
 conforme o layout configurado no Android, incluindo Shift, Caps Lock e Num Lock.
@@ -46,7 +57,7 @@ e fornecer o caractere correspondente ao layout.
 Limites conhecidos: desconectar um teclado limpa os modificadores físicos de
 todos os teclados; Shift travado no painel virtual participa dos atalhos, mas
 não recalcula o caractere físico fornecido pelo layout Android. Os testes
-locais não substituem compilação completa, instalação ou teste de entrada e
+locais e a compilação completa não substituem instalação ou teste de entrada e
 GPU no aparelho. Este projeto não altera o layout configurado pelo usuário.
 
 Fonte de referência: [simfeo/blender](https://github.com/simfeo/blender/tree/android-alpha-3).

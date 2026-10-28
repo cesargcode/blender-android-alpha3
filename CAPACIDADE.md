@@ -2,15 +2,59 @@
 
 Avaliação em 28/10/2026 da base `89479ec817bfe9411ae6ef6f35392d5450e1ad0b` (Android Alpha 3, Full).
 
-## Atualização: compilação Full concluída na execução 4
+## Resultado final: compilação Full e envio concluídos na execução 6
 
-O [run 40695500313](https://github.com/cesargcode/blender-android-alpha3/actions/runs/40695500313)
-concluiu a compilação e o empacotamento Full no runner público `ubuntu-24.04`, com
-`JOBS=2`, e gerou um APK exibido no log como `272M`. A checagem seguinte falhou
-porque o leitor esperava `sdkVersion`, enquanto o `aapt2` 35.0.1 escreve
-`minSdkVersion`. O APK dessa execução não foi retido pelo workflow de então.
-Isso demonstra capacidade para compilar a versão usada naquele run, não aprovação
-do APK ou teste funcional no aparelho.
+A [execução 6, 40731216675](https://github.com/cesargcode/blender-android-alpha3/actions/runs/40731216675),
+no commit `90d8bba59bd2594b64293a943186cfe66aef9935`, terminou com **sucesso** no
+runner público `ubuntu-24.04`, com `JOBS=2`, em 28/10/2026. Full, Java/DEX/APK e
+as verificações do pacote concluíram; os 16 arquivos tiveram envio confirmado.
+
+| Medição da execução 6 | Valor e alcance |
+| --- | --- |
+| Job completo | 1 h 35 min 30 s, das 16:58:41 às 18:34:11 UTC |
+| Etapa da receita | 1 h 33 min 43 s, incluindo compilação e empacotamento; não é somente Ninja Full |
+| Envio para o draft | 53 s, com os 16 arquivos confirmados |
+| APK unsigned original baixado | 284.937.749 bytes; SHA-256 `676dc6a0e576dbe1c219946c7ce3323912b6e66ac8c744fe87e8ea9a27161045` |
+
+Após o download, duas dependências glTF ausentes foram acrescentadas localmente
+da revisão Android fixada, sem recompilar ou alterar o conteúdo das entradas
+originais. O pacote foi inspecionado e assinado. O instalador final, entregue
+localmente, tem 287.065.402 bytes e SHA-256
+`c7aa70e957ec911a738432d6f8b0b74a9f96cc217a46353222496924bc207ea9`.
+O draft contém o unsigned original e não é a entrega desse instalador assinado.
+As 610 verificações estáticas, a assinatura v3 e o alinhamento passaram; o
+funcionamento no aparelho não foi testado. Detalhes no [guia da receita](build/README.md).
+
+O runner gratuito com duas tarefas concluiu três compilações Full. Não houve
+necessidade demonstrada de runner pago, cache persistente ou `JOBS=4`. As medições
+de RAM e disco disponíveis abaixo são das execuções anteriores; não devem ser
+interpretadas como medições de pico da execução 6.
+
+## Histórico: compilação Full nas execuções 4 e 5
+
+O [run 40716244136, execução 5](https://github.com/cesargcode/blender-android-alpha3/actions/runs/40716244136),
+compilou o patch com texto físico, no commit `19da3e81136a641ab367173801b5f8fac364d99b`,
+em configuração Full no runner público `ubuntu-24.04`, com `JOBS=2`. Concluiu
+Java/DEX/APK e as verificações de SDK, ABI ARM64, alinhamento e estado unsigned;
+o log exibiu o APK como `272M` e a receita terminou com `BUILD_CHECKS_PASSED`.
+A falha seguinte foi de transferência: `HTTP 400: Bad Content-Length` no relatório
+vazio `apk-zipalign.txt`. Quatro arquivos auxiliares chegaram ao draft, sem o APK.
+Isso confirma capacidade de compilação dessa versão; não comprova funcionamento
+no aparelho nem deixa um instalador disponível.
+
+| Medição da execução 5 | Valor e alcance |
+| --- | --- |
+| Geradores host, etapa cronometrada | 4 min 11,23 s |
+| Compilação antecipada dos arquivos alterados e dependências | 7 min 33 s |
+| Etapa Ninja Full, após a compilação antecipada | 56 min 09,05 s; não inclui downloads, configuração, host tools, compilação antecipada ou empacotamento |
+| Pasta de trabalho após empacotar | 20.015.640.576 bytes = 20,02 GB = 18,64 GiB |
+| Espaço livre no filesystem após empacotar | 69.261.111.296 bytes = 69,26 GB = 64,50 GiB |
+| RSS máximo registrado por `/usr/bin/time -v` no Ninja Full | 8.124.076 KiB ≈ 7,75 GiB; máximo por processo da árvore, **não pico agregado de todos os processos** |
+
+A [execução 4](https://github.com/cesargcode/blender-android-alpha3/actions/runs/40695500313)
+também concluiu Full e empacotamento com duas tarefas, ainda com a versão anterior
+à correção de texto. Falhou no leitor de `minSdkVersion`, posteriormente corrigido.
+Suas medições históricas foram:
 
 | Medição da execução 4 | Valor e alcance |
 | --- | --- |
@@ -20,22 +64,29 @@ do APK ou teste funcional no aparelho.
 | RSS máximo registrado por `/usr/bin/time -v` no Ninja Full | 8.125.244 KiB ≈ 7,75 GiB; máximo por processo da árvore, **não pico agregado de todos os processos** |
 
 Os dados de disco são fotografias ao fim da etapa, não medidas do pico. O pico
-agregado de RAM continua sem medição. `JOBS=2` é a configuração comprovada para
-essa compilação; aumentar para quatro tarefas pode elevar a pressão de memória
-e não tem ganho de duração demonstrado. Não há motivo medido para contratar um
-runner pago. Sem cache persistente, a próxima VM recomeça downloads e compilação.
+agregado de RAM continua sem medição. `JOBS=2` é a configuração comprovada nessas
+duas compilações; aumentar para quatro tarefas pode elevar a pressão de memória
+e não tem ganho de duração demonstrado. A diferença de duração entre as duas
+execuções não isola uma causa. Não há motivo medido para contratar um runner
+pago. Sem cache persistente, a próxima VM recomeça downloads e compilação.
 
 A [receita atual](build/README.md) verifica SDK/manifest antes do build, compila
 Java e os cinco arquivos C++ alterados antecipadamente e aceita ambos os nomes
-do campo mínimo, exigindo minSdk 31 e targetSdk 34. O workflow atualizado preserva
-um APK existente após falha em draft Release como `UNVALIDATED`, com relatórios
-e checksums; isso não transforma a falha em sucesso.
+do campo mínimo, exigindo minSdk 31 e targetSdk 34. O novo envio confirma o APK
+antes dos relatórios e trata arquivos vazios explicitamente. O
+[teste real 40730980115](https://github.com/cesargcode/blender-android-alpha3/actions/runs/40730980115)
+confirmou estado, tamanho e SHA-256 de cinco arquivos de texto em 29 segundos;
+isso testa o mecanismo com textos, não a transferência de um APK.
+Na execução 6, esse mesmo mecanismo confirmou o envio do APK e dos relatórios,
+conforme registrado acima.
+Se uma checagem falhar após existir um APK, o workflow tenta preservá-lo no draft
+como `UNVALIDATED`, com relatórios e checksums; isso não transforma a falha em sucesso.
 
 ## Estudo anterior e diagnóstico inicial
 
 As seções seguintes preservam o inventário e a avaliação feitos **antes** da
 compilação completa. `capacidade-medida.json` continua sendo o registro histórico
-desse inventário e do diagnóstico inicial, sem incluir as medições da execução 4.
+desse inventário e do diagnóstico inicial, sem incluir as medições das execuções 4 e 5.
 
 **O diagnóstico inicial do runner público confirmou 85,736 GiB livres, sem limpeza.** Naquele momento, havia folga de disco para tentar a compilação Full, mas ainda não existiam medições do build. Os 100 GiB da receita são uma margem de planejamento configurável, não um requisito medido do Blender.
 
@@ -100,9 +151,9 @@ Os **14 GB** da documentação abaixo são a especificação publicada do runner
 
 Os recursos são os documentados pelo [GitHub para runners padrão](https://docs.github.com/en/actions/reference/runners/github-hosted-runners) e [larger runners](https://docs.github.com/en/actions/reference/runners/larger-runners). O runner maior é pago, requer uma organização GitHub Team ou Enterprise Cloud e configuração prévia; uma conta pessoal Pro, isoladamente, não o habilita. Não foi contratado ou iniciado runner pago.
 
-Todos os runners hospedados pelo GitHub têm limite de **6 horas por job**. Na avaliação inicial ainda não existia medição de duração deste build; a execução 4 posteriormente concluiu a compilação com duas tarefas Ninja no runner público de quatro CPUs. Isso não mede o efeito de aumentar o paralelismo. Jobs separados precisam transportar resultados e dependências entre máquinas. [Limites de Actions](https://docs.github.com/en/actions/reference/limits).
+Todos os runners hospedados pelo GitHub têm limite de **6 horas por job**. Na avaliação inicial ainda não existia medição de duração deste build; as execuções 4 e 5 posteriormente concluíram a compilação com duas tarefas Ninja no runner público de quatro CPUs. Isso não mede o efeito de aumentar o paralelismo. Jobs separados precisam transportar resultados e dependências entre máquinas. [Limites de Actions](https://docs.github.com/en/actions/reference/limits).
 
-O diagnóstico inicial justificou tentar o runner público gratuito e conservar os logs; a compilação da execução 4 confirmou essa escolha. Não houve limpeza de arquivos do computador local ou da VM nesta avaliação.
+O diagnóstico inicial justificou tentar o runner público gratuito e conservar os logs; as compilações das execuções 4 e 5 confirmaram essa escolha. Não houve limpeza de arquivos do computador local ou da VM nesta avaliação.
 
 ## Decisão prática para a primeira execução
 
