@@ -127,6 +127,7 @@ jobs:
           df -hT "$GITHUB_WORKSPACE"
 
       - name: Compilar e validar o pacote unsigned
+        id: compile_apk
         timeout-minutes: 315
         run: |
           set -euo pipefail
@@ -143,40 +144,143 @@ jobs:
             printf '```\n\nO sucesso do build nao comprova funcionamento em Android.\n'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Guardar resultado em draft Release (sem Actions artifact)
-        if: success()
+      - name: Recuperar APK e evidencias, inclusive apos falha de validacao
+        id: recover_apk
+        if: ${{ !cancelled() && (steps.compile_apk.outcome == 'success' || steps.compile_apk.outcome == 'failure') }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          BUILD_STEP_OUTCOME: ${{ steps.compile_apk.outcome }}
         run: |
           set -euo pipefail
-          output="$RUNNER_TEMP/blender-alpha3-build/output"
-          unsigned="$output/blender-alpha3-modificadores-full-arm64-unsigned.apk"
-          [[ -s "$unsigned" ]]
-          # GitHub Releases allows up to 2 GiB per asset; fail clearly before upload.
-          [[ "$(stat -c %s "$unsigned")" -lt 2147483648 ]]
-          tail -n 2000 "$RUNNER_TEMP/blender-alpha3-build/logs/build-full.log" \
-            | head -c 1048576 > "$output/build-log-tail.txt" || true
-          printf 'repository_commit=%s\nsource_commit=89479ec817bfe9411ae6ef6f35392d5450e1ad0b\n' \
-            "$GITHUB_SHA" > "$output/source-provenance.txt"
-          printf 'source_url=https://github.com/simfeo/blender/tree/89479ec817bfe9411ae6ef6f35392d5450e1ad0b\n' \
-            >> "$output/source-provenance.txt"
-          sha256sum blender-alpha3-modificadores.patch >> "$output/source-provenance.txt"
-          notes="$RUNNER_TEMP/unsigned-release-notes.md"
-          cat > "$notes" <<'NOTES'
-          APK Full ARM64 experimental, unsigned. Nao e um instalador pronto para Android.
-          Assinatura com chave local estavel e teste funcional no aparelho ainda pendentes.
-          Mantido em draft para revisao; nao publicar como release de instalador validado.
-          A fonte base, patch, receitas e revisoes estao identificados em source-provenance.txt
-          e build-manifest.txt. O arquivo de log contem apenas o trecho final do build.
-          NOTES
+          printf 'available=false\n' >> "$GITHUB_OUTPUT"
+          task="$RUNNER_TEMP/blender-alpha3-build"
+          output="$task/output"
+          review="$task/release-review"
+          candidate="$output/blender-alpha3-modificadores-full-arm64-unsigned.apk"
+          origin=recipe_output
+          if [[ ! -s "$candidate" ]]; then
+            candidate="$task/blender_build_android/android_apk_stage_full/blender-full.apk"
+            origin=upstream_packaging_stage
+          fi
+          if [[ ! -s "$candidate" ]]; then
+            printf '\n### Recuperacao\n\nNenhum APK foi produzido; nenhum draft Release sera criado.\n' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Do not mislabel a partial, signed unexpectedly, or rejected package as
+          # a validated unsigned result. Keep the recipe's failure visible.
+          validation=UNVALIDATED
+          apk_name=blender-alpha3-modificadores-full-arm64-UNVALIDATED.apk
+          if [[ "$BUILD_STEP_OUTCOME" == success && "$origin" == recipe_output ]]; then
+            validation=BUILD_CHECKS_PASSED
+            apk_name=blender-alpha3-modificadores-full-arm64-unsigned.apk
+          fi
+          # Releases permits at most 2 GiB per asset. No secondary failure if a
+          # failed build has left an oversized partial file that cannot upload.
+          if [[ "$(stat -c %s "$candidate")" -ge 2147483648 ]]; then
+            printf '\n### Recuperacao\n\nAPK excede o limite de 2 GiB por asset; draft nao criado.\n' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          mkdir -p "$review"
+          cp -- "$candidate" "$review/$apk_name"
+          # Preserve any original reports separately. A recovery manifest must
+          # never invent the recipe manifest or claim requested SDK values were observed.
+          for name in build-manifest.txt apk-badging.txt apk-signature.txt; do
+            if [[ -f "$output/$name" ]]; then
+              cp -- "$output/$name" "$review/recipe-$name"
+            fi
+          done
+          report_status() {
+            local name="$1" tool="$2" status
+            shift 2
+            if [[ -x "$tool" ]]; then
+              if "$tool" "$@" > "$review/$name" 2>&1; then
+                status=0
+              else
+                status=$?
+              fi
+            else
+              printf 'NOT_AVAILABLE: tool missing: %s\n' "$tool" > "$review/$name"
+              status=NOT_AVAILABLE
+            fi
+            printf '%s_exit_status=%s\n' "${name%.txt}" "$status" >> "$review/report-status.txt"
+          }
+          : > "$review/report-status.txt"
+          bt="${ANDROID_HOME:-}/build-tools/35.0.1"
+          report_status apk-badging.txt "$bt/aapt2" dump badging "$review/$apk_name"
+          report_status apk-signature.txt "$bt/apksigner" verify --verbose --print-certs "$review/$apk_name"
+          report_status apk-zipalign.txt "$bt/zipalign" -c -p 4 "$review/$apk_name"
+          printf 'A nonzero signature verification status is expected for an unsigned APK; it is not proof of any other validation.\n' \
+            >> "$review/report-status.txt"
+          if [[ -f "$task/logs/build-full.log" ]]; then
+            tail -c 1048576 "$task/logs/build-full.log" | tail -n 2000 > "$review/build-log-tail.txt" || true
+          else
+            printf 'NOT_AVAILABLE: build-full.log was not created.\n' > "$review/build-log-tail.txt"
+          fi
+          {
+            printf 'repository=%s\nrepository_commit=%s\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+            printf 'workflow_run=%s/%s/actions/runs/%s\nrun_attempt=%s\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+            printf 'requested_source_commit=89479ec817bfe9411ae6ef6f35392d5450e1ad0b\n'
+            printf 'source_url=https://github.com/simfeo/blender/tree/89479ec817bfe9411ae6ef6f35392d5450e1ad0b\n'
+            for pair in source:source linux_lib:source/lib/linux_x64 android_lib:source/lib/android_arm64 vulkan_headers:blender_build_android/lib/vulkan_headers; do
+              observed="$(git -C "$task/${pair#*:}" rev-parse HEAD 2>/dev/null || true)"
+              printf 'observed_%s_commit=%s\n' "${pair%%:*}" "${observed:-NOT_AVAILABLE}"
+            done
+          } > "$review/source-provenance.txt"
+          for name in blender-alpha3-modificadores.patch LICENSE; do
+            if [[ -f "$GITHUB_WORKSPACE/$name" ]]; then
+              cp -- "$GITHUB_WORKSPACE/$name" "$review/$name"
+              printf '%s=INCLUDED\n' "$name" >> "$review/source-provenance.txt"
+            else
+              printf '%s=NOT_AVAILABLE\n' "$name" >> "$review/source-provenance.txt"
+            fi
+          done
+          if [[ -f "$task/applied-source.diff" ]]; then
+            cp -- "$task/applied-source.diff" "$review/source-applied.diff"
+          fi
+          {
+            printf 'artifact_status=%s\nbuild_step_outcome=%s\n' "$validation" "$BUILD_STEP_OUTCOME"
+            printf 'artifact_filename=%s\nartifact_origin=%s\n' "$apk_name" "$origin"
+            printf 'recovered_at_utc=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            printf 'requested_configuration=full\nrequested_abi=arm64-v8a\nrequested_min_sdk=31\nrequested_target_sdk=34\nrequested_compile_sdk=35\n'
+            printf 'requested_sign_apk=0\nparallel_jobs=%s\n' "$JOBS"
+            printf 'observed_package_metadata=apk-badging.txt\nreport_exit_statuses=report-status.txt\n'
+            printf 'source_provenance=source-provenance.txt\nchecksums=SHA256SUMS.txt\n'
+            printf 'local_signing=NOT_PERFORMED_BY_WORKFLOW\ndevice_runtime_test=NOT_PERFORMED\n'
+            printf 'UNVALIDATED means no successful final build verification; recovery does not change the original build result.\n'
+          } > "$review/build-manifest.txt"
+          {
+            printf '# %s — APK experimental para revisao\n\n' "$validation"
+            printf 'Resultado da etapa de compilacao/checagem: `%s`. Origem recuperada: `%s`.\n\n' "$BUILD_STEP_OUTCOME" "$origin"
+            printf 'Configuracao solicitada: Full ARM64 unsigned. Os valores observados e o estado da assinatura estao nos relatorios anexos.\n\n'
+            if [[ "$validation" == UNVALIDATED ]]; then
+              printf '**UNVALIDATED: a verificacao final nao concluiu com sucesso. Este APK foi preservado para diagnostico e nao deve ser tratado como instalador validado.**\n\n'
+            fi
+            printf 'Assinatura local estavel e teste funcional no aparelho ainda pendentes. Manter em draft; nao publicar como instalador validado.\n\n'
+            printf 'Fonte, patch, licenca, checksums e relatorios disponiveis acompanham o pacote. Ausencias e falhas de ferramentas estao declaradas nos manifests. O log contem somente seu trecho final.\n'
+          } > "$review/release-notes.md"
+          (
+            cd "$review"
+            sha256sum -- * > "$task/release-review-SHA256SUMS.txt"
+            mv -- "$task/release-review-SHA256SUMS.txt" SHA256SUMS.txt
+          )
+          printf 'available=true\nvalidation=%s\n' "$validation" >> "$GITHUB_OUTPUT"
+          printf '\n### APK preservado\n\nEstado: **%s**. A recuperacao nao altera o resultado original da compilacao.\n' \
+            "$validation" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guardar APK e evidencias em draft Release (sem Actions artifact)
+        if: ${{ !cancelled() && steps.recover_apk.outputs.available == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK_VALIDATION: ${{ steps.recover_apk.outputs.validation }}
+        run: |
+          set -euo pipefail
+          review="$RUNNER_TEMP/blender-alpha3-build/release-review"
+          assets=("$review"/*)
           tag="build-unsigned-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           release_url="$(gh release create "$tag" \
-            "$unsigned" "$output/SHA256SUMS.txt" "$output/build-manifest.txt" \
-            "$output/apk-signature.txt" "$output/apk-badging.txt" \
-            "$output/build-log-tail.txt" "$output/source-provenance.txt" \
-            blender-alpha3-modificadores.patch LICENSE \
+            "${assets[@]}" \
             --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
-            --title "Blender Alpha 3 Full ARM64 unsigned - $GITHUB_RUN_ID" \
-            --notes-file "$notes")"
-          printf '\n### Resultado para revisao\n\nDraft Release: %s\n\nSem assinatura final e sem teste no aparelho.\n' \
-            "$release_url" >> "$GITHUB_STEP_SUMMARY"
+            --title "Blender Alpha 3 Full ARM64 $APK_VALIDATION - $GITHUB_RUN_ID" \
+            --notes-file "$review/release-notes.md")"
+          printf '\n### Resultado para revisao\n\nDraft Release: %s\n\nEstado: **%s**. Sem assinatura local final e sem teste no aparelho.\n' \
+            "$release_url" "$APK_VALIDATION" >> "$GITHUB_STEP_SUMMARY"
