@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Adapt the pinned upstream APK packager without editing its source checkout.
 
-The complete resource/Java/native assembly is retained. Only path discovery is
-made explicit for the temporary script, and the signing tail is replaced with
-zipalign. No signing key is loaded or generated in this path.
+The complete resource/Java/native assembly is retained. Path discovery is made
+explicit for the temporary script, glTF bridges seed native dependency closure,
+and the signing tail is replaced with zipalign. No signing key is loaded or
+generated in this path.
 """
 import argparse
 import hashlib
@@ -12,6 +13,24 @@ from pathlib import Path
 EXPECTED_SHA256 = "9263c75354dd9fc2c1bb8cd6a3bbd4522cf7953ff55a83716efa1d3b720ac950"
 LOCATION = 'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"'
 SIGNING_MARKER = 'echo "[apk] signing"\n'
+CLOSURE_LOOP = '  for cur in "$JNI"/*.so; do\n'
+PAYLOAD_PATCH_LOOP = '''for so in $(find "$PAYLOAD/python" -name '*.so'); do
+  patch_unversion "$so"
+done
+'''
+CLOSURE_WITH_BRIDGES = '''  # Bridges live outside payload/python but need libraries in jniLibs too.
+  for cur in "$JNI"/*.so \\
+      "$PAYLOAD/scripts/addons_core/io_scene_gltf2/libbf_intern_meshopt_bridge.so" \\
+      "$PAYLOAD/scripts/addons_core/io_scene_gltf2/libbf_intern_draco_bridge.so"; do
+    [ -f "$cur" ] || continue
+'''
+PATCH_BRIDGES = '''# Keep the payload copies' dependency names consistent with jniLibs.
+for so in "$PAYLOAD/scripts/addons_core/io_scene_gltf2/libbf_intern_meshopt_bridge.so" \\
+    "$PAYLOAD/scripts/addons_core/io_scene_gltf2/libbf_intern_draco_bridge.so"; do
+  [ -f "$so" ] || continue
+  patch_unversion "$so"
+done
+'''
 
 
 def main() -> None:
@@ -23,10 +42,14 @@ def main() -> None:
     if hashlib.sha256(contents).hexdigest() != EXPECTED_SHA256:
         raise SystemExit("Upstream package.sh differs from the pinned Alpha 3 version.")
     text = contents.decode("utf-8")
-    if text.count(LOCATION) != 1 or text.count(SIGNING_MARKER) != 1:
+    if any(text.count(anchor) != 1 for anchor in (
+        LOCATION, SIGNING_MARKER, CLOSURE_LOOP, PAYLOAD_PATCH_LOOP
+    )):
         raise SystemExit("Pinned package.sh layout differs; review unsigned adaptation.")
     text = text.split(SIGNING_MARKER, 1)[0]
     text = text.replace(LOCATION, 'SCRIPT_DIR="${BLENDER_PACKAGE_SCRIPT_DIR:?}"')
+    text = text.replace(CLOSURE_LOOP, CLOSURE_WITH_BRIDGES)
+    text = text.replace(PAYLOAD_PATCH_LOOP, PAYLOAD_PATCH_LOOP + PATCH_BRIDGES)
     text += '''echo "[apk] aligning unsigned package (no signing key)"
 "$BT/zipalign" -f -p 4 "$OUT" "$STAGE/blender-aligned.apk"
 mv "$STAGE/blender-aligned.apk" "$OUT"
