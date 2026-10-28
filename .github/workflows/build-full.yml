@@ -1,0 +1,131 @@
+name: Build Full ARM64 unsigned (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: Tarefas Ninja; 2 reduz pressao de RAM, 4 usa mais memoria
+        required: true
+        default: '2'
+        type: choice
+        options: ['2', '4']
+
+permissions: {}
+
+concurrency:
+  group: blender-alpha3-full-unsigned
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    # Used only by the final gh step to create a draft release; no personal token.
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      JOBS: ${{ inputs.jobs }}
+      MIN_FREE_GIB: '40'
+      SIGN_APK: '0'
+    steps:
+      - name: Obter este commit publico sem credenciais persistidas
+        run: |
+          set -euo pipefail
+          [[ "$JOBS" == 2 || "$JOBS" == 4 ]]
+          git init "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" config core.autocrlf false
+          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git -C "$GITHUB_WORKSPACE" fetch --depth 1 origin "$GITHUB_SHA"
+          git -C "$GITHUB_WORKSPACE" checkout --detach "$GITHUB_SHA"
+          [[ "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          printf '## Build experimental unsigned\n\nRunner padrao publico, limite 6 horas, JOBS=%s.\n' "$JOBS" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Sem limpeza de ferramentas, cache remoto ou Actions artifacts. Assinatura local posterior.\n' >> "$GITHUB_STEP_SUMMARY"
+          df -hT "$GITHUB_WORKSPACE"
+          free -h
+          nproc
+
+      - name: Preparar compiladores e ferramentas
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang-18 cmake ninja-build patchelf \
+            zip unzip git-lfs openjdk-17-jdk python3 python3-pip ca-certificates time
+          [[ -x "$JAVA_HOME_17_X64/bin/javac" ]]
+          printf 'JAVA_HOME=%s\n' "$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          command -v gh
+          git lfs version
+          clang-18 --version
+          cmake --version
+          ninja --version
+
+      - name: Instalar a revisao exata do NDK e SDK
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          sdkmanager_path="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [[ -x "$sdkmanager_path" ]]
+          # Use only licenses already present on the runner. With stdin closed,
+          # missing acceptance must stop installation instead of accepting terms.
+          "$sdkmanager_path" --sdk_root="$ANDROID_HOME" --install --channel=3 \
+            'ndk;30.0.14904198' 'build-tools;35.0.1' 'platforms;android-35' 'platform-tools' </dev/null
+          cat "$ANDROID_HOME/ndk/30.0.14904198/source.properties"
+          df -hT "$GITHUB_WORKSPACE"
+
+      - name: Compilar e validar o pacote unsigned
+        timeout-minutes: 315
+        run: |
+          set -euo pipefail
+          bash build/build-full-ubuntu24.sh "$RUNNER_TEMP/blender-alpha3-build"
+
+      - name: Resumo final de recursos
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            printf '\n### Recursos no fim da execucao\n\n```text\n'
+            df -hT "$GITHUB_WORKSPACE"
+            free -h
+            printf '```\n\nO sucesso do build nao comprova funcionamento em Android.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guardar resultado em draft Release (sem Actions artifact)
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/blender-alpha3-build/output"
+          unsigned="$output/blender-alpha3-modificadores-full-arm64-unsigned.apk"
+          [[ -s "$unsigned" ]]
+          # GitHub Releases allows up to 2 GiB per asset; fail clearly before upload.
+          [[ "$(stat -c %s "$unsigned")" -lt 2147483648 ]]
+          tail -n 2000 "$RUNNER_TEMP/blender-alpha3-build/logs/build-full.log" \
+            | head -c 1048576 > "$output/build-log-tail.txt" || true
+          printf 'repository_commit=%s\nsource_commit=89479ec817bfe9411ae6ef6f35392d5450e1ad0b\n' \
+            "$GITHUB_SHA" > "$output/source-provenance.txt"
+          printf 'source_url=https://github.com/simfeo/blender/tree/89479ec817bfe9411ae6ef6f35392d5450e1ad0b\n' \
+            >> "$output/source-provenance.txt"
+          sha256sum blender-alpha3-modificadores.patch >> "$output/source-provenance.txt"
+          notes="$RUNNER_TEMP/unsigned-release-notes.md"
+          cat > "$notes" <<'NOTES'
+          APK Full ARM64 experimental, unsigned. Nao e um instalador pronto para Android.
+          Assinatura com chave local estavel e teste funcional no aparelho ainda pendentes.
+          Mantido em draft para revisao; nao publicar como release de instalador validado.
+          A fonte base, patch, receitas e revisoes estao identificados em source-provenance.txt
+          e build-manifest.txt. O arquivo de log contem apenas o trecho final do build.
+          NOTES
+          tag="build-unsigned-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          release_url="$(gh release create "$tag" \
+            "$unsigned" "$output/SHA256SUMS.txt" "$output/build-manifest.txt" \
+            "$output/apk-signature.txt" "$output/apk-badging.txt" \
+            "$output/build-log-tail.txt" "$output/source-provenance.txt" \
+            blender-alpha3-modificadores.patch LICENSE \
+            --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
+            --title "Blender Alpha 3 Full ARM64 unsigned - $GITHUB_RUN_ID" \
+            --notes-file "$notes")"
+          printf '\n### Resultado para revisao\n\nDraft Release: %s\n\nSem assinatura final e sem teste no aparelho.\n' \
+            "$release_url" >> "$GITHUB_STEP_SUMMARY"
