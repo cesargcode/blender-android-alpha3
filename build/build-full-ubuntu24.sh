@@ -197,6 +197,27 @@ cmake -S . -B "$HOST_BUILD" -G Ninja \
   -DCMAKE_BUILD_RPATH="$SRC/lib/linux_x64/tbb/lib"
 timed_build ninja -j "$JOBS" -C "$HOST_BUILD" makesdna makesrna datatoc msgfmt shader_tool
 record_resources after-host-tools
+
+# Android also creates an ExternalProject at this distinct host_tools path.
+# It forwards the target's WITH_* flags, including WITH_HEADLESS=OFF, on every
+# configure. Keep a project hook in this native cache so those command-line
+# flags cannot re-enable desktop input. Do not forward this hook to Android;
+# audio and all other Full features retain the target's forwarded values.
+HOST_OVERRIDE_FILE="$TASK_DIR/host-tools-overrides.cmake"
+cat > "$HOST_OVERRIDE_FILE" <<'CMAKE'
+if(ANDROID OR CMAKE_CROSSCOMPILING)
+  message(FATAL_ERROR "Host code-generator overrides reached a cross-compiled target")
+endif()
+set(WITH_HEADLESS ON CACHE BOOL "Native code generators need no display" FORCE)
+set(WITH_X11_XINPUT OFF CACHE BOOL "Native code generators need no XInput" FORCE)
+CMAKE
+cmake -S . -B "$TARGET_BUILD/host_tools" -G Ninja \
+  -C build_files/android/android_features_full.cmake \
+  -DWITH_CROSSCOMPILED_TOOLS=OFF \
+  -DCMAKE_C_COMPILER="$ANDROID_HOST_CC" -DCMAKE_CXX_COMPILER="$ANDROID_HOST_CXX" \
+  -DCMAKE_PROJECT_Blender_INCLUDE:FILEPATH="$HOST_OVERRIDE_FILE" \
+  -DCMAKE_BUILD_RPATH="$SRC/lib/linux_x64/tbb/lib"
+
 cmake -S . -B "$TARGET_BUILD" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="$ANDROID_TOOLCHAIN_FILE" \
   -DANDROID_ABI="$ANDROID_ABI" -DANDROID_PLATFORM="android-$ANDROID_API" \
