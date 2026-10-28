@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
@@ -20,9 +21,29 @@ FIXTURE = r'''
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
-enum { KM_SHIFT = 1, KM_CTRL = 2, KM_ALT = 4 };
+@WM_MODIFIER_ENUM@
+/* Typed bitwise operations model WM_types.hh's ENUM_OPERATORS for this actual enum.
+ * Do not replace the enum with a byte: that hides invalid assignments in production. */
+constexpr wmEventModifierFlag operator|(wmEventModifierFlag a, wmEventModifierFlag b)
+{
+  return wmEventModifierFlag(uint8_t(a) | uint8_t(b));
+}
+constexpr wmEventModifierFlag operator&(wmEventModifierFlag a, wmEventModifierFlag b)
+{
+  return wmEventModifierFlag(uint8_t(a) & uint8_t(b));
+}
+constexpr wmEventModifierFlag operator~(wmEventModifierFlag value)
+{
+  return wmEventModifierFlag(~uint8_t(value));
+}
+wmEventModifierFlag &operator|=(wmEventModifierFlag &a, wmEventModifierFlag b)
+{
+  return a = a | b;
+}
+static_assert(std::is_same_v<std::underlying_type_t<wmEventModifierFlag>, uint8_t>);
 enum { VK_MOD_CTRL = 0, VK_MOD_SHIFT = 1, VK_MOD_ALT = 2, VK_MOD_NUM = 3 };
 enum GHOST_TKey {
   GHOST_kKeyUnknown, GHOST_kKeyLeftControl, GHOST_kKeyRightControl,
@@ -42,7 +63,7 @@ enum {
 struct GHOST_TEventKeyData { GHOST_TKey key; };
 struct GHOST_TEventCursorData { int x, y; };
 struct GHOST_TEventButtonData { int button; };
-struct wmEvent { uint8_t modifier = 0; int xy[2] = {}; };
+struct wmEvent { wmEventModifierFlag modifier = wmEventModifierFlag(0); int xy[2] = {}; };
 struct wmWindowRuntime { wmEvent *eventstate; };
 struct wmWindow { wmWindowRuntime *runtime; };
 struct wmWindowManager {};
@@ -109,21 +130,23 @@ static bool vk_point_is_owned(const wmWindow *, const int[2]) { return false; }
 static bool vk_position_in_area(const wmWindow *, const int[2]) { return true; }
 static void wm_cursor_position_from_ghost_screen_coords(wmWindow *, int *, int *) {}
 static int vk_key_at(const VirtualKeyboard &, const int[2]) { return 0; }
-static uint8_t key_flag(GHOST_TKey key)
+static wmEventModifierFlag key_flag(GHOST_TKey key)
 {
   if (key == GHOST_kKeyLeftControl || key == GHOST_kKeyRightControl) return KM_CTRL;
   if (key == GHOST_kKeyLeftShift || key == GHOST_kKeyRightShift) return KM_SHIFT;
   if (key == GHOST_kKeyLeftAlt || key == GHOST_kKeyRightAlt) return KM_ALT;
-  return 0;
+  return wmEventModifierFlag(0);
 }
-struct RecordedEvent { GHOST_TKey key; bool down; uint8_t modifier; char text[16]; };
+struct RecordedEvent { GHOST_TKey key; bool down; wmEventModifierFlag modifier; char text[16]; };
 static std::vector<RecordedEvent> events;
-uint8_t wm_virtual_keyboard_modifiers_get(const wmWindow *win);
+@WM_MODIFIER_DECLARATION@
+static_assert(std::is_same_v<decltype(wmEvent{}.modifier), wmEventModifierFlag>);
+static_assert(std::is_same_v<decltype(wm_virtual_keyboard_modifiers_get(nullptr)), wmEventModifierFlag>);
 static void vk_send_ghost_key(wmWindowManager *, wmWindow *win,
                               GHOST_TKey key, const char *text, bool down)
 {
   wmEvent event = *win->runtime->eventstate;
-  const uint8_t flag = key_flag(key);
+  const wmEventModifierFlag flag = key_flag(key);
   if (flag) event.modifier = down ? (event.modifier | flag) : (event.modifier & ~flag);
   /* The production merge line is inserted here by the Python runner. */
   @WM_MODIFIER_MERGE@
@@ -308,10 +331,20 @@ def main() -> None:
     source = args.source / "source/blender/windowmanager/intern/wm_virtual_keyboard.cc"
     source_text = source.read_text(encoding="utf-8")
     event_source = source.with_name("wm_event_system.cc").read_text(encoding="utf-8")
+    wm_types = (args.source / "source/blender/windowmanager/WM_types.hh").read_text(encoding="utf-8")
+    wm_header = (args.source / "source/blender/windowmanager/wm.hh").read_text(encoding="utf-8")
+    enum_match = re.search(r"enum wmEventModifierFlag\s*:\s*uint8_t\s*\{.*?\n\};", wm_types, re.S)
+    if not enum_match or "wmEventModifierFlag modifier;" not in wm_types:
+        raise RuntimeError("Expected the production wmEventModifierFlag enum and wmEvent modifier field")
+    declaration_match = re.search(r"^\w+\s+wm_virtual_keyboard_modifiers_get\([^;]+;", wm_header, re.M)
+    if not declaration_match:
+        raise RuntimeError("Expected the production virtual-modifier getter declaration")
     merge_line = "event.modifier |= wm_virtual_keyboard_modifiers_get(win);"
     if event_source.count(merge_line) != 1:
         raise RuntimeError("Expected exactly one production virtual-modifier merge")
-    pieces = [FIXTURE.replace("@WM_MODIFIER_MERGE@", merge_line)]
+    pieces = [FIXTURE.replace("@WM_MODIFIER_MERGE@", merge_line)
+                    .replace("@WM_MODIFIER_ENUM@", enum_match.group())
+                    .replace("@WM_MODIFIER_DECLARATION@", declaration_match.group())]
     functions = [
         "vk_modifier_flag", "wm_virtual_keyboard_modifiers_get",
         "wm_virtual_keyboard_external_modifiers_set", "vk_mod_is_on",
@@ -332,6 +365,16 @@ def main() -> None:
     compile_env["ZIG_LOCAL_CACHE_DIR"] = str(workspace / "tools/zig-local-cache")
     with tempfile.TemporaryDirectory(prefix="blender-vk-tests-", dir=generated) as temporary:
         executable = Path(temporary) / "virtual_keyboard_test.exe"
+        # The former uint8_t getter made this operation choose a built-in int result,
+        # which cannot be assigned to wmEventModifierFlag. Prove this harness rejects it.
+        invalid_fixture = Path(temporary) / "invalid_modifier_merge.cc"
+        invalid_fixture.write_text(fixture.read_text(encoding="utf-8").replace(
+            merge_line, "event.modifier |= uint8_t(wm_virtual_keyboard_modifiers_get(win));"), encoding="utf-8")
+        rejected = subprocess.run([str(args.zig), "c++", "-std=c++17", "-fsyntax-only",
+                                   str(invalid_fixture)], capture_output=True, text=True, env=compile_env)
+        if rejected.returncode == 0 or "wmEventModifierFlag" not in rejected.stderr:
+            raise RuntimeError("Enum regression guard did not reject the formerly invalid byte-mask merge")
+        print("PASS: production modifier enum rejects the formerly invalid uint8_t merge", flush=True)
         subprocess.run([str(args.zig), "c++", "-std=c++17", "-O0", "-Wall", "-Wextra",
                         str(fixture), "-o", str(executable)], check=True, env=compile_env)
         subprocess.run([str(executable)], check=True)
