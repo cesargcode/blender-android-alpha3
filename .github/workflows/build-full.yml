@@ -9,6 +9,11 @@ on:
         default: '2'
         type: choice
         options: ['2', '4']
+      accept_ndk_preview_license:
+        description: Li e aceito o Android SDK Preview License Agreement da Google para o NDK r30 beta1
+        required: true
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -31,9 +36,15 @@ jobs:
       MIN_FREE_GIB: '40'
       SIGN_APK: '0'
     steps:
-      - name: Obter este commit publico sem credenciais persistidas
+      - name: Verificar aceite explicito e obter este commit publico
+        env:
+          ACCEPT_NDK_PREVIEW_LICENSE: ${{ inputs.accept_ndk_preview_license }}
         run: |
           set -euo pipefail
+          if [[ "$ACCEPT_NDK_PREVIEW_LICENSE" != true ]]; then
+            printf 'O Android SDK Preview License Agreement da Google nao foi aceito. Nenhuma instalacao ou compilacao iniciada.\n' >&2
+            exit 1
+          fi
           [[ "$JOBS" == 2 || "$JOBS" == 4 ]]
           git init "$GITHUB_WORKSPACE"
           git -C "$GITHUB_WORKSPACE" config core.autocrlf false
@@ -68,10 +79,50 @@ jobs:
           set -euo pipefail
           sdkmanager_path="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           [[ -x "$sdkmanager_path" ]]
-          # Use only licenses already present on the runner. With stdin closed,
-          # missing acceptance must stop installation instead of accepting terms.
+          # Bind consent to the exact preview agreement presented for review.
+          # Changed terms or a different package/license association stop here.
+          python3 - <<'PY'
+          import hashlib
+          import urllib.request
+          import xml.etree.ElementTree as ET
+
+          url = 'https://dl.google.com/android/repository/repository2-3.xml'
+          expected = '8a75fe5d27e03e154ec5d7c2d2b9130386278f8662a207ac6ba6b53ae7d52982'
+          with urllib.request.urlopen(url, timeout=30) as response:
+              data = response.read(8 * 1024 * 1024 + 1)
+          if len(data) > 8 * 1024 * 1024:
+              raise SystemExit('Catalogo SDK excedeu o limite de verificacao; nenhum aceite realizado.')
+          root = ET.fromstring(data)
+          local_name = lambda node: node.tag.rsplit('}', 1)[-1]
+          licenses = [node for node in root if local_name(node) == 'license'
+                      and node.get('id') == 'android-sdk-preview-license']
+          packages = [node for node in root if local_name(node) == 'remotePackage'
+                      and node.get('path') == 'ndk;30.0.14904198']
+          if len(licenses) != 1 or len(packages) != 1:
+              raise SystemExit('Pacote/licenca esperado nao localizado; nenhum aceite realizado.')
+          license_refs = [node.get('ref') for node in packages[0]
+                          if local_name(node) == 'uses-license']
+          digest = hashlib.sha256(''.join(licenses[0].itertext()).strip().encode('utf-8')).hexdigest()
+          if digest != expected or license_refs != ['android-sdk-preview-license']:
+              raise SystemExit('O acordo NDK mudou: revise os novos termos antes de aceitar. Nenhum aceite realizado.')
+          print('Acordo NDK confere com o texto revisado: SHA256=' + digest)
+          PY
+          # Accept only the agreement requested for this specific NDK package,
+          # after the explicit workflow input gate above. Never run --licenses.
+          # yes may exit on SIGPIPE after sdkmanager finishes; check sdkmanager's
+          # status, retaining real download/installation errors.
+          set +e
+          yes | "$sdkmanager_path" --sdk_root="$ANDROID_HOME" --install --channel=3 \
+            'ndk;30.0.14904198'
+          ndk_status=${PIPESTATUS[1]}
+          set -e
+          if [[ "$ndk_status" -ne 0 ]]; then
+            printf 'A instalacao do NDK falhou (codigo %s).\n' "$ndk_status" >&2
+            exit "$ndk_status"
+          fi
+          # Other SDK packages may use only the licenses already on the runner.
           "$sdkmanager_path" --sdk_root="$ANDROID_HOME" --install --channel=3 \
-            'ndk;30.0.14904198' 'build-tools;35.0.1' 'platforms;android-35' 'platform-tools' </dev/null
+            'build-tools;35.0.1' 'platforms;android-35' 'platform-tools' </dev/null
           cat "$ANDROID_HOME/ndk/30.0.14904198/source.properties"
           df -hT "$GITHUB_WORKSPACE"
 
