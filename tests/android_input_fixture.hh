@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -26,6 +27,8 @@ enum {
   AKEYCODE_DPAD_RIGHT = 22,
   AKEYCODE_A = 29,
   AKEYCODE_Z = 54,
+  AKEYCODE_COMMA = 55,
+  AKEYCODE_PERIOD = 56,
   AKEYCODE_ALT_LEFT = 57,
   AKEYCODE_ALT_RIGHT = 58,
   AKEYCODE_SHIFT_LEFT = 59,
@@ -34,12 +37,36 @@ enum {
   AKEYCODE_SPACE = 62,
   AKEYCODE_ENTER = 66,
   AKEYCODE_DEL = 67,
+  AKEYCODE_GRAVE = 68,
+  AKEYCODE_MINUS = 69,
+  AKEYCODE_EQUALS = 70,
+  AKEYCODE_LEFT_BRACKET = 71,
+  AKEYCODE_RIGHT_BRACKET = 72,
+  AKEYCODE_BACKSLASH = 73,
+  AKEYCODE_SEMICOLON = 74,
+  AKEYCODE_APOSTROPHE = 75,
+  AKEYCODE_SLASH = 76,
+  AKEYCODE_PLUS = 81,
   AKEYCODE_ESCAPE = 111,
   AKEYCODE_FORWARD_DEL = 112,
   AKEYCODE_CTRL_LEFT = 113,
   AKEYCODE_CTRL_RIGHT = 114,
   AKEYCODE_META_LEFT = 117,
   AKEYCODE_META_RIGHT = 118,
+  AKEYCODE_MOVE_HOME = 122,
+  AKEYCODE_MOVE_END = 123,
+  AKEYCODE_F1 = 131,
+  AKEYCODE_F12 = 142,
+  AKEYCODE_NUMPAD_0 = 144,
+  AKEYCODE_NUMPAD_9 = 153,
+  AKEYCODE_NUMPAD_DIVIDE = 154,
+  AKEYCODE_NUMPAD_MULTIPLY = 155,
+  AKEYCODE_NUMPAD_SUBTRACT = 156,
+  AKEYCODE_NUMPAD_ADD = 157,
+  AKEYCODE_NUMPAD_DOT = 158,
+  AKEYCODE_NUMPAD_COMMA = 159,
+  AKEYCODE_NUMPAD_ENTER = 160,
+  AKEYCODE_NUMPAD_EQUALS = 161,
 };
 
 enum {
@@ -57,6 +84,7 @@ enum {
   AMETA_META_LEFT_ON = 0x20000,
   AMETA_META_RIGHT_ON = 0x40000,
   AMETA_CAPS_LOCK_ON = 0x100000,
+  AMETA_NUM_LOCK_ON = 0x200000,
 };
 
 struct AInputEvent {
@@ -64,11 +92,39 @@ struct AInputEvent {
   int32_t action;
   int32_t meta_state;
   int32_t repeat = 0;
+  int32_t device_id = 4;
 };
 static int32_t AKeyEvent_getKeyCode(const AInputEvent *e) { return e->keycode; }
 static int32_t AKeyEvent_getAction(const AInputEvent *e) { return e->action; }
 static int32_t AKeyEvent_getMetaState(const AInputEvent *e) { return e->meta_state; }
 static int32_t AKeyEvent_getRepeatCount(const AInputEvent *e) { return e->repeat; }
+static int32_t AInputEvent_getDeviceId(const AInputEvent *e) { return e->device_id; }
+
+// JNI/Android character-map boundary only: tests provide explicit layout responses.
+// Character selection is never synthesized from a US keyboard table here or in production.
+struct android_app {};
+struct TestKeyCharacter {
+  int32_t device_id, keycode, meta_state, unicode;
+};
+static std::vector<TestKeyCharacter> test_key_characters;
+static int unicode_lookup_count = 0;
+static int32_t android_key_unicode(android_app *, int32_t device, int32_t key, int32_t meta) {
+  ++unicode_lookup_count;
+  for (const auto &entry : test_key_characters) {
+    if (entry.device_id == device && entry.keycode == key && entry.meta_state == meta) {
+      return entry.unicode;
+    }
+  }
+  return 0;
+}
+struct TestAccentComposition { int32_t accent, character, composed; };
+static std::vector<TestAccentComposition> test_accent_compositions;
+static int32_t android_compose_key_accent(android_app *, int32_t accent, int32_t character) {
+  for (const auto &entry : test_accent_compositions) {
+    if (entry.accent == accent && entry.character == character) return entry.composed;
+  }
+  return 0;
+}
 
 // Only identity and contiguous A-Z/0-9 arithmetic matter to the functions tested.
 // These host enum values deliberately make no ABI or Android build claim.
@@ -96,6 +152,30 @@ enum GHOST_TKey {
   GHOST_kKeyRightAlt,
   GHOST_kKeyLeftOS,
   GHOST_kKeyRightOS,
+  GHOST_kKeyComma,
+  GHOST_kKeyPeriod,
+  GHOST_kKeyAccentGrave,
+  GHOST_kKeyMinus,
+  GHOST_kKeyEqual,
+  GHOST_kKeyLeftBracket,
+  GHOST_kKeyRightBracket,
+  GHOST_kKeyBackslash,
+  GHOST_kKeySemicolon,
+  GHOST_kKeyQuote,
+  GHOST_kKeySlash,
+  GHOST_kKeyPlus,
+  GHOST_kKeyHome,
+  GHOST_kKeyEnd,
+  GHOST_kKeyNumpad0 = 400,
+  GHOST_kKeyNumpad9 = GHOST_kKeyNumpad0 + 9,
+  GHOST_kKeyNumpadPeriod,
+  GHOST_kKeyNumpadEnter,
+  GHOST_kKeyNumpadPlus,
+  GHOST_kKeyNumpadMinus,
+  GHOST_kKeyNumpadAsterisk,
+  GHOST_kKeyNumpadSlash,
+  GHOST_kKeyF1 = 500,
+  GHOST_kKeyF12 = GHOST_kKeyF1 + 11,
 };
 
 enum GHOST_TModifierKey {

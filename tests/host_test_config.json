@@ -17,6 +17,8 @@
     "GHOST_SystemAndroid::touchCancelPending",
     "GHOST_SystemAndroid::handleWindowFocus",
     "convertAndroidKey",
+    "android_unicode_to_utf8",
+    "GHOST_SystemAndroid::dispatchKeyEvent",
     "GHOST_SystemAndroid::handleKeyEvent",
     "GHOST_SystemAndroid::getModifierKeys",
     "utf8_char_len",
