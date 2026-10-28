@@ -189,6 +189,11 @@ git -C "$VH" diff --cached --quiet || die 'Os headers Vulkan têm alterações s
 cd "$SRC"
 # shellcheck source=/dev/null
 source build_files/android/env.sh
+printf '\n[preflight] Compiling the patched Android activity with the packaging SDK/JDK.\n'
+mkdir -p "$TASK_DIR/java-compile-check"
+"$JAVA_HOME/bin/javac" -classpath "$ANDROID_HOME/platforms/android-35/android.jar" \
+  -source 17 -target 17 -d "$TASK_DIR/java-compile-check" \
+  "$SRC/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java"
 cmake -S . -B "$HOST_BUILD" -G Ninja \
   -C build_files/android/android_features_full.cmake \
   -DWITH_CROSSCOMPILED_TOOLS=OFF \
@@ -223,6 +228,34 @@ cmake -S . -B "$TARGET_BUILD" -G Ninja \
   -DANDROID_ABI="$ANDROID_ABI" -DANDROID_PLATFORM="android-$ANDROID_API" \
   -DHOST_C_COMPILER="$ANDROID_HOST_CC" -DHOST_CXX_COMPILER="$ANDROID_HOST_CXX" \
   -DBLENDER_ANDROID_CONFIG=full
+
+# Compile all patched translation units before the rest of Blender. Resolve
+# their object targets from this generated Ninja graph and reject missing or
+# ambiguous matches instead of assuming a CMake object-directory layout.
+ninja -C "$TARGET_BUILD" -t targets all > "$TASK_DIR/logs/ninja-targets.txt"
+python3 - "$TASK_DIR/logs/ninja-targets.txt" "$TASK_DIR/changed-object-targets.txt" <<'PY'
+from pathlib import Path
+import sys
+
+targets = [line.split(': ', 1)[0] for line in Path(sys.argv[1]).read_text().splitlines()]
+sources = {
+    'intern/ghost/': ['GHOST_SystemAndroid.cc', 'GHOST_AndroidMain.cc'],
+    'source/blender/windowmanager/': [
+        'wm_event_system.cc', 'wm_window.cc', 'wm_virtual_keyboard.cc'],
+}
+objects = []
+for directory, names in sources.items():
+    for name in names:
+        matches = [target for target in targets
+                   if target.startswith(directory) and target.endswith('/' + name + '.o')]
+        if len(matches) != 1:
+            raise SystemExit(f'Expected one Android object target for {name}; found {matches}')
+        objects.append(matches[0])
+Path(sys.argv[2]).write_text('\n'.join(objects) + '\n')
+print('[preflight] Patched Android objects:\n' + '\n'.join(objects))
+PY
+mapfile -t PATCHED_OBJECT_TARGETS < "$TASK_DIR/changed-object-targets.txt"
+timed_build ninja -j "$JOBS" -C "$TARGET_BUILD" "${PATCHED_OBJECT_TARGETS[@]}"
 timed_build ninja -j "$JOBS" -C "$TARGET_BUILD" blender bf_intern_meshopt_bridge bf_intern_draco_bridge
 record_resources after-android-build
 if [[ "$SIGN_APK" == 1 ]]; then
