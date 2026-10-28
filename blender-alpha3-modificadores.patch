@@ -1,0 +1,921 @@
+diff --git a/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java b/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java
+index e87d977..965d65d 100644
+--- a/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java
++++ b/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java
+@@ -6,6 +6,9 @@ package org.blender.blender;
+ 
+ import android.app.NativeActivity;
+ import android.content.Context;
++import android.hardware.input.InputManager;
++import android.util.SparseBooleanArray;
++import android.view.InputDevice;
+ import android.content.Intent;
+ import android.content.pm.ActivityInfo;
+ import android.content.res.AssetManager;
+@@ -56,6 +59,54 @@ public class BlenderActivity extends NativeActivity {
+   private static final String TAG = "Blender";
+ 
+   private InputView inputView;
++  private InputManager inputManager;
++  private final SparseBooleanArray physicalKeyboards = new SparseBooleanArray();
++  private native void nativeOnKeyboardDisconnected();
++
++  private void rememberKeyboard(int deviceId) {
++    InputDevice device = InputDevice.getDevice(deviceId);
++    if (device != null && !device.isVirtual()
++        && device.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC) {
++      physicalKeyboards.put(deviceId, true);
++    }
++    else {
++      physicalKeyboards.delete(deviceId);
++    }
++  }
++
++  private final InputManager.InputDeviceListener inputDeviceListener =
++      new InputManager.InputDeviceListener() {
++    @Override
++    public void onInputDeviceAdded(int deviceId) {
++      rememberKeyboard(deviceId);
++    }
++
++    @Override
++    public void onInputDeviceChanged(int deviceId) {
++      boolean wasKeyboard = physicalKeyboards.get(deviceId);
++      rememberKeyboard(deviceId);
++      if (wasKeyboard && !physicalKeyboards.get(deviceId)) {
++        nativeOnKeyboardDisconnected();
++      }
++    }
++
++    @Override
++    public void onInputDeviceRemoved(int deviceId) {
++      if (physicalKeyboards.get(deviceId)) {
++        physicalKeyboards.delete(deviceId);
++        /* The UI thread only enqueues this; GHOST releases keys on Blender's thread. */
++        nativeOnKeyboardDisconnected();
++      }
++    }
++  };
++
++  @Override
++  protected void onDestroy() {
++    if (inputManager != null) {
++      inputManager.unregisterInputDeviceListener(inputDeviceListener);
++    }
++    super.onDestroy();
++  }
+ 
+   private native void nativeOnCommitText(String text);
+   private native void nativeOnKey(int keycode, int action, int metaState);
+@@ -82,6 +133,13 @@ public class BlenderActivity extends NativeActivity {
+ 
+     inputView = new InputView(this);
+     addContentView(inputView, new ViewGroup.LayoutParams(1, 1));
++    inputManager = (InputManager)getSystemService(Context.INPUT_SERVICE);
++    if (inputManager != null) {
++      for (int deviceId : inputManager.getInputDeviceIds()) {
++        rememberKeyboard(deviceId);
++      }
++      inputManager.registerInputDeviceListener(inputDeviceListener, null);
++    }
+   }
+ 
+   /* Scoped storage confines the app to its sandbox, but Blender opens and saves
+diff --git a/build_files/android/java/org/blender/blender/BlenderActivity.java b/build_files/android/java/org/blender/blender/BlenderActivity.java
+index a82c3ee..5b06432 100644
+--- a/build_files/android/java/org/blender/blender/BlenderActivity.java
++++ b/build_files/android/java/org/blender/blender/BlenderActivity.java
+@@ -6,6 +6,9 @@ package org.blender.blender;
+ 
+ import android.app.NativeActivity;
+ import android.content.Context;
++import android.hardware.input.InputManager;
++import android.util.SparseBooleanArray;
++import android.view.InputDevice;
+ import android.content.pm.ActivityInfo;
+ import android.os.Bundle;
+ import android.text.InputType;
+@@ -25,6 +28,54 @@ import android.view.inputmethod.InputMethodManager;
+ public class BlenderActivity extends NativeActivity {
+ 
+   private InputView inputView;
++  private InputManager inputManager;
++  private final SparseBooleanArray physicalKeyboards = new SparseBooleanArray();
++  private native void nativeOnKeyboardDisconnected();
++
++  private void rememberKeyboard(int deviceId) {
++    InputDevice device = InputDevice.getDevice(deviceId);
++    if (device != null && !device.isVirtual()
++        && device.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC) {
++      physicalKeyboards.put(deviceId, true);
++    }
++    else {
++      physicalKeyboards.delete(deviceId);
++    }
++  }
++
++  private final InputManager.InputDeviceListener inputDeviceListener =
++      new InputManager.InputDeviceListener() {
++    @Override
++    public void onInputDeviceAdded(int deviceId) {
++      rememberKeyboard(deviceId);
++    }
++
++    @Override
++    public void onInputDeviceChanged(int deviceId) {
++      boolean wasKeyboard = physicalKeyboards.get(deviceId);
++      rememberKeyboard(deviceId);
++      if (wasKeyboard && !physicalKeyboards.get(deviceId)) {
++        nativeOnKeyboardDisconnected();
++      }
++    }
++
++    @Override
++    public void onInputDeviceRemoved(int deviceId) {
++      if (physicalKeyboards.get(deviceId)) {
++        physicalKeyboards.delete(deviceId);
++        /* The UI thread only enqueues this; GHOST releases keys on Blender's thread. */
++        nativeOnKeyboardDisconnected();
++      }
++    }
++  };
++
++  @Override
++  protected void onDestroy() {
++    if (inputManager != null) {
++      inputManager.unregisterInputDeviceListener(inputDeviceListener);
++    }
++    super.onDestroy();
++  }
+ 
+   private native void nativeOnCommitText(String text);
+   private native void nativeOnKey(int keycode, int action, int metaState);
+@@ -36,6 +87,13 @@ public class BlenderActivity extends NativeActivity {
+ 
+     inputView = new InputView(this);
+     addContentView(inputView, new ViewGroup.LayoutParams(1, 1));
++    inputManager = (InputManager)getSystemService(Context.INPUT_SERVICE);
++    if (inputManager != null) {
++      for (int deviceId : inputManager.getInputDeviceIds()) {
++        rememberKeyboard(deviceId);
++      }
++      inputManager.registerInputDeviceListener(inputDeviceListener, null);
++    }
+   }
+ 
+   /* Called from native (popupOnScreenKeyboard). */
+diff --git a/intern/ghost/intern/GHOST_AndroidMain.cc b/intern/ghost/intern/GHOST_AndroidMain.cc
+index f927b79..c9d8513 100644
+--- a/intern/ghost/intern/GHOST_AndroidMain.cc
++++ b/intern/ghost/intern/GHOST_AndroidMain.cc
+@@ -308,6 +308,14 @@ extern "C" JNIEXPORT void JNICALL Java_org_blender_blender_BlenderActivity_nativ
+   }
+ }
+ 
++extern "C" JNIEXPORT void JNICALL
++Java_org_blender_blender_BlenderActivity_nativeOnKeyboardDisconnected(JNIEnv *, jobject)
++{
++  if (GHOST_SystemAndroid *system = android_system_if_ready()) {
++    system->handleKeyboardDisconnected();
++  }
++}
++
+ extern "C" void android_main(struct android_app *app)
+ {
+   ghost_android_open_log(app);
+diff --git a/intern/ghost/intern/GHOST_SystemAndroid.cc b/intern/ghost/intern/GHOST_SystemAndroid.cc
+index ae9cf24..022c3ff 100644
+--- a/intern/ghost/intern/GHOST_SystemAndroid.cc
++++ b/intern/ghost/intern/GHOST_SystemAndroid.cc
+@@ -51,6 +51,94 @@ static constexpr int32_t TOUCH_LONG_PRESS_MOVE_PX = 16;
+  * on them is what made every attempt to scroll a panel zoom it instead. */
+ static constexpr float GESTURE_DECIDE_PX = 24.0f;
+ 
++struct AndroidModifier {
++  int32_t any, left, right;
++  int32_t left_code, right_code;
++  GHOST_TKey ghost_key;
++  GHOST_TModifierKey ghost_left, ghost_right;
++};
++
++static constexpr AndroidModifier android_modifiers[] = {
++    {AMETA_SHIFT_ON, AMETA_SHIFT_LEFT_ON, AMETA_SHIFT_RIGHT_ON,
++     AKEYCODE_SHIFT_LEFT, AKEYCODE_SHIFT_RIGHT, GHOST_kKeyLeftShift,
++     GHOST_kModifierKeyLeftShift, GHOST_kModifierKeyRightShift},
++    {AMETA_CTRL_ON, AMETA_CTRL_LEFT_ON, AMETA_CTRL_RIGHT_ON,
++     AKEYCODE_CTRL_LEFT, AKEYCODE_CTRL_RIGHT, GHOST_kKeyLeftControl,
++     GHOST_kModifierKeyLeftControl, GHOST_kModifierKeyRightControl},
++    {AMETA_ALT_ON, AMETA_ALT_LEFT_ON, AMETA_ALT_RIGHT_ON,
++     AKEYCODE_ALT_LEFT, AKEYCODE_ALT_RIGHT, GHOST_kKeyLeftAlt,
++     GHOST_kModifierKeyLeftAlt, GHOST_kModifierKeyRightAlt},
++    {AMETA_META_ON, AMETA_META_LEFT_ON, AMETA_META_RIGHT_ON,
++     AKEYCODE_META_LEFT, AKEYCODE_META_RIGHT, GHOST_kKeyLeftOS,
++     GHOST_kModifierKeyLeftOS, GHOST_kModifierKeyRightOS},
++};
++
++static bool is_android_modifier(int32_t keycode)
++{
++  for (const AndroidModifier &modifier : android_modifiers) {
++    if (keycode == modifier.left_code || keycode == modifier.right_code) {
++      return true;
++    }
++  }
++  return false;
++}
++
++void GHOST_SystemAndroid::updatePhysicalModifiers(int32_t keycode,
++                                                  int32_t action,
++                                                  int32_t meta_state)
++{
++  int32_t next = 0;
++  for (const AndroidModifier &modifier : android_modifiers) {
++    int32_t sides = meta_state & (modifier.left | modifier.right);
++    if (!sides && (meta_state & modifier.any)) {
++      /* Some devices supply only the group bit. Keep a known side when possible. */
++      sides = meta_state_ & (modifier.left | modifier.right);
++      if (!sides) {
++        sides = keycode == modifier.right_code ? modifier.right : modifier.left;
++      }
++    }
++    const int32_t changed = keycode == modifier.left_code ? modifier.left :
++                            keycode == modifier.right_code ? modifier.right : 0;
++    if (action == AKEY_EVENT_ACTION_DOWN) {
++      sides |= changed;
++    }
++    else if (action == AKEY_EVENT_ACTION_UP) {
++      sides &= ~changed;
++    }
++    if (sides) {
++      next |= sides | modifier.any;
++    }
++  }
++  meta_state_ = next;
++  syncModifierEvents();
++}
++
++void GHOST_SystemAndroid::syncModifierEvents()
++{
++  if (!window_) {
++    return;
++  }
++  const int32_t effective = meta_state_ | (touch_shift_active_ ? AMETA_SHIFT_ON : 0);
++  for (const AndroidModifier &modifier : android_modifiers) {
++    const bool down = (effective & modifier.any) != 0;
++    if (down == ((emitted_modifiers_ & modifier.any) != 0)) {
++      continue;
++    }
++    /* Blender tracks one flag per group, not per side. Emit one logical edge so releasing
++     * either of two held Shifts (or ending a synthetic pan) cannot release the other. */
++    pushEvent(std::make_unique<GHOST_EventKey>(getMilliSeconds(),
++                                             down ? GHOST_kEventKeyDown : GHOST_kEventKeyUp,
++                                             window_, modifier.ghost_key, false));
++  }
++  emitted_modifiers_ = effective;
++}
++
++void GHOST_SystemAndroid::resetPhysicalModifiers()
++{
++  meta_state_ = 0;
++  syncModifierEvents();
++}
++
+ GHOST_SystemAndroid::GHOST_SystemAndroid()
+     : app_(g_android_app),
+       window_(nullptr),
+@@ -228,9 +316,36 @@ void GHOST_SystemAndroid::handleNativeWindowInit(android_app *app)
+ 
+ void GHOST_SystemAndroid::handleWindowFocus(bool gained)
+ {
++  {
++    std::scoped_lock lock(java_input_mutex_);
++    java_input_enabled_ = gained;
++    if (!gained) {
++      java_input_.clear();
++    }
++  }
++  input_focused_ = gained;
+   if (!window_) {
+     return;
+   }
++  if (!gained) {
++    touchEndPan();
++    touchCancelPending();
++    touchSendShift(false);
++    resetPhysicalModifiers();
++    for (const GHOST_TButton button : {GHOST_kButtonMaskLeft, GHOST_kButtonMaskMiddle,
++                                      GHOST_kButtonMaskRight, GHOST_kButtonMaskButton4,
++                                      GHOST_kButtonMaskButton5})
++    {
++      if (buttons_.get(button)) {
++        buttons_.set(button, false);
++        pushEvent(std::make_unique<GHOST_EventButton>(
++            getMilliSeconds(), GHOST_kEventButtonUp, window_, button, GHOST_TABLET_DATA_NONE));
++      }
++    }
++    stylus_button_down_ = false;
++    gesture_active_ = false;
++    hover_exit_pending_ = false;
++  }
+   /* Without this the window manager never learns the window is active, and it then treats every
+    * button event as arriving at a window that is being entered: it takes the cursor position from
+    * GHOST at that moment and writes it over the position the event carries.
+@@ -296,9 +411,11 @@ static GHOST_TabletData tablet_from_event(AInputEvent *event)
+ 
+ int32_t GHOST_SystemAndroid::handleInputEvent(AInputEvent *event)
+ {
+-  if (!window_) {
++  if (!window_ || !input_focused_) {
+     return 0;
+   }
++  /* Apply already queued IME keys/disconnection before this native input. */
++  drainJavaInput();
+   switch (AInputEvent_getType(event)) {
+     case AINPUT_EVENT_TYPE_KEY:
+       return handleKeyEvent(event);
+@@ -324,7 +441,7 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
+     const int32_t y = int32_t(ghost_android_scale_input(AMotionEvent_getY(event, 0)));
+     cursor_x_ = x;
+     cursor_y_ = y;
+-    meta_state_ = AMotionEvent_getMetaState(event);
++    /* Pointer snapshots must not overwrite the separately held keyboard modifiers. */
+     pushEvent(std::make_unique<GHOST_EventCursor>(
+         getMilliSeconds(), GHOST_kEventCursorMove, window_, x, y, GHOST_TABLET_DATA_NONE));
+ 
+@@ -485,7 +602,6 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
+                                               tablet_from_event(event);
+   int32_t x = int32_t(ghost_android_scale_input(AMotionEvent_getX(event, 0)));
+   int32_t y = int32_t(ghost_android_scale_input(AMotionEvent_getY(event, 0)));
+-  meta_state_ = AMotionEvent_getMetaState(event);
+ 
+   /* A pointer that leaves proximity simply stops sending events, so reporting its last
+    * position keeps the button under it highlighted and its tooltip on screen forever.
+@@ -595,20 +711,7 @@ void GHOST_SystemAndroid::touchSendShift(bool down)
+     return;
+   }
+   touch_shift_active_ = down;
+-  /* The window manager re-reads getModifierKeys() on every button event (see touch_shift_active_)
+-   * and injects a matching press or release whenever it disagrees with the event state, so the
+-   * synthetic key event only survives if meta_state_ tells the same story. */
+-  if (down) {
+-    meta_state_ |= AMETA_SHIFT_ON;
+-  }
+-  else {
+-    meta_state_ &= ~AMETA_SHIFT_ON;
+-  }
+-  pushEvent(std::make_unique<GHOST_EventKey>(getMilliSeconds(),
+-                                             down ? GHOST_kEventKeyDown : GHOST_kEventKeyUp,
+-                                             window_,
+-                                             GHOST_kKeyLeftShift,
+-                                             false));
++  syncModifierEvents();
+ }
+ 
+ void GHOST_SystemAndroid::touchEndPan()
+@@ -698,6 +801,22 @@ static GHOST_TKey convertAndroidKey(int32_t keycode)
+       return GHOST_kKeyUpArrow;
+     case AKEYCODE_DPAD_DOWN:
+       return GHOST_kKeyDownArrow;
++    case AKEYCODE_SHIFT_LEFT:
++      return GHOST_kKeyLeftShift;
++    case AKEYCODE_SHIFT_RIGHT:
++      return GHOST_kKeyRightShift;
++    case AKEYCODE_CTRL_LEFT:
++      return GHOST_kKeyLeftControl;
++    case AKEYCODE_CTRL_RIGHT:
++      return GHOST_kKeyRightControl;
++    case AKEYCODE_ALT_LEFT:
++      return GHOST_kKeyLeftAlt;
++    case AKEYCODE_ALT_RIGHT:
++      return GHOST_kKeyRightAlt;
++    case AKEYCODE_META_LEFT:
++      return GHOST_kKeyLeftOS;
++    case AKEYCODE_META_RIGHT:
++      return GHOST_kKeyRightOS;
+     default:
+       return GHOST_kKeyUnknown;
+   }
+@@ -705,12 +824,20 @@ static GHOST_TKey convertAndroidKey(int32_t keycode)
+ 
+ int32_t GHOST_SystemAndroid::handleKeyEvent(AInputEvent *event)
+ {
+-  meta_state_ = AKeyEvent_getMetaState(event);
+-  const GHOST_TKey key = convertAndroidKey(AKeyEvent_getKeyCode(event));
++  const int32_t action = AKeyEvent_getAction(event);
++  if (action != AKEY_EVENT_ACTION_DOWN && action != AKEY_EVENT_ACTION_UP) {
++    return 0;
++  }
++  const int32_t keycode = AKeyEvent_getKeyCode(event);
++  updatePhysicalModifiers(keycode, action, AKeyEvent_getMetaState(event));
++  if (is_android_modifier(keycode)) {
++    return 1;
++  }
++  const GHOST_TKey key = convertAndroidKey(keycode);
+   if (key == GHOST_kKeyUnknown) {
+     return 0;
+   }
+-  const bool down = AKeyEvent_getAction(event) == AKEY_EVENT_ACTION_DOWN;
++  const bool down = action == AKEY_EVENT_ACTION_DOWN;
+   const bool repeat = AKeyEvent_getRepeatCount(event) > 0;
+   pushEvent(std::make_unique<GHOST_EventKey>(
+       getMilliSeconds(), down ? GHOST_kEventKeyDown : GHOST_kEventKeyUp, window_, key, repeat));
+@@ -741,32 +868,47 @@ void GHOST_SystemAndroid::handleTextInput(const char *utf8_string)
+     return;
+   }
+   std::scoped_lock lock(java_input_mutex_);
+-  java_text_.push_back(utf8_string);
++  if (java_input_enabled_) {
++    java_input_.push_back({JavaInputEvent::Type::Text, utf8_string});
++  }
+ }
+ 
+ void GHOST_SystemAndroid::handleJavaKeyEvent(int32_t keycode, int32_t action, int32_t meta_state)
+ {
+   std::scoped_lock lock(java_input_mutex_);
+-  java_keys_.push_back({keycode, action, meta_state});
++  if (java_input_enabled_) {
++    java_input_.push_back({JavaInputEvent::Type::Key, {}, keycode, action, meta_state});
++  }
++}
++
++void GHOST_SystemAndroid::handleKeyboardDisconnected()
++{
++  std::scoped_lock lock(java_input_mutex_);
++  if (java_input_enabled_) {
++    java_input_.push_back({JavaInputEvent::Type::KeyboardDisconnected, {}});
++  }
+ }
+ 
+ void GHOST_SystemAndroid::drainJavaInput()
+ {
+-  std::vector<std::string> text;
+-  std::vector<JavaKeyEvent> keys;
++  std::vector<JavaInputEvent> input;
+   {
+     std::scoped_lock lock(java_input_mutex_);
+-    if (java_text_.empty() && java_keys_.empty()) {
+-      return;
+-    }
+-    text.swap(java_text_);
+-    keys.swap(java_keys_);
++    input.swap(java_input_);
+   }
+-  for (const std::string &string : text) {
+-    dispatchTextInput(string.c_str());
+-  }
+-  for (const JavaKeyEvent &key : keys) {
+-    dispatchJavaKeyEvent(key.keycode, key.action, key.meta_state);
++  /* One FIFO preserves edits such as Backspace followed by replacement text. */
++  for (const JavaInputEvent &event : input) {
++    switch (event.type) {
++      case JavaInputEvent::Type::Text:
++        dispatchTextInput(event.text.c_str());
++        break;
++      case JavaInputEvent::Type::Key:
++        dispatchJavaKeyEvent(event.keycode, event.action, event.meta_state);
++        break;
++      case JavaInputEvent::Type::KeyboardDisconnected:
++        resetPhysicalModifiers();
++        break;
++    }
+   }
+ }
+ 
+@@ -806,10 +948,15 @@ void GHOST_SystemAndroid::dispatchTextInput(const char *utf8_string)
+ 
+ void GHOST_SystemAndroid::dispatchJavaKeyEvent(int32_t keycode, int32_t action, int32_t meta_state)
+ {
+-  if (!window_) {
++  if (!window_ || (action != AKEY_EVENT_ACTION_DOWN && action != AKEY_EVENT_ACTION_UP)) {
++    return;
++  }
++  /* InputConnection metadata is not a hardware snapshot (even Caps Lock can be IME-only).
++   * Accept explicit modifier edges without releasing other physically held groups. */
++  if (is_android_modifier(keycode)) {
++    updatePhysicalModifiers(keycode, action, meta_state | meta_state_);
+     return;
+   }
+-  meta_state_ = meta_state;
+   const GHOST_TKey key = convertAndroidKey(keycode);
+   if (key == GHOST_kKeyUnknown) {
+     return;
+@@ -821,18 +968,14 @@ void GHOST_SystemAndroid::dispatchJavaKeyEvent(int32_t keycode, int32_t action,
+ 
+ GHOST_TSuccess GHOST_SystemAndroid::getModifierKeys(GHOST_ModifierKeys &keys) const
+ {
+-  const bool shift = (meta_state_ & AMETA_SHIFT_ON) != 0;
+-  const bool ctrl = (meta_state_ & AMETA_CTRL_ON) != 0;
+-  const bool alt = (meta_state_ & AMETA_ALT_ON) != 0;
+-  const bool os = (meta_state_ & AMETA_META_ON) != 0;
+-  keys.set(GHOST_kModifierKeyLeftShift, shift);
+-  keys.set(GHOST_kModifierKeyRightShift, shift);
+-  keys.set(GHOST_kModifierKeyLeftControl, ctrl);
+-  keys.set(GHOST_kModifierKeyRightControl, ctrl);
+-  keys.set(GHOST_kModifierKeyLeftAlt, alt);
+-  keys.set(GHOST_kModifierKeyRightAlt, alt);
+-  keys.set(GHOST_kModifierKeyLeftOS, os);
+-  keys.set(GHOST_kModifierKeyRightOS, os);
++  keys.clear();
++  for (const AndroidModifier &modifier : android_modifiers) {
++    keys.set(modifier.ghost_left, (meta_state_ & modifier.left) != 0);
++    keys.set(modifier.ghost_right, (meta_state_ & modifier.right) != 0);
++  }
++  if (touch_shift_active_) {
++    keys.set(GHOST_kModifierKeyLeftShift, true);
++  }
+   return GHOST_kSuccess;
+ }
+ 
+diff --git a/intern/ghost/intern/GHOST_SystemAndroid.hh b/intern/ghost/intern/GHOST_SystemAndroid.hh
+index c04d0dd..958018d 100644
+--- a/intern/ghost/intern/GHOST_SystemAndroid.hh
++++ b/intern/ghost/intern/GHOST_SystemAndroid.hh
+@@ -76,6 +76,7 @@ class GHOST_SystemAndroid : public GHOST_System {
+   /* Soft-keyboard input forwarded from the Java InputConnection bridge. */
+   void handleTextInput(const char *utf8_string);
+   void handleJavaKeyEvent(int32_t keycode, int32_t action, int32_t meta_state);
++  void handleKeyboardDisconnected();
+ 
+  private:
+   GHOST_TSuccess init() override;
+@@ -93,6 +94,9 @@ class GHOST_SystemAndroid : public GHOST_System {
+ 
+   int32_t handleKeyEvent(AInputEvent *event);
+   int32_t handleMotionEvent(AInputEvent *event);
++  void updatePhysicalModifiers(int32_t keycode, int32_t action, int32_t meta_state);
++  void syncModifierEvents();
++  void resetPhysicalModifiers();
+ 
+   android_app *app_;
+   GHOST_WindowAndroid *window_;
+@@ -101,6 +105,9 @@ class GHOST_SystemAndroid : public GHOST_System {
+   /* Input state tracked from events for the out-of-queue queries. */
+   GHOST_Buttons buttons_;
+   int32_t meta_state_;
++  /* Groups already delivered to Blender. Physical sides and touch ownership stay separate. */
++  int32_t emitted_modifiers_ = 0;
++  bool input_focused_ = true;
+   int32_t cursor_x_, cursor_y_;
+ 
+   /* S Pen side button, tracked so it works while hovering or touching. */
+@@ -122,10 +129,7 @@ class GHOST_SystemAndroid : public GHOST_System {
+    * to a rotate), and one-finger drags stay available to Blender's buttons, sliders and editor
+    * borders. */
+   bool touch_pan_active_;
+-  /* Whether the synthetic Shift that turns that middle-mouse drag into a pan is held. Tracked so
+-   * it can be mirrored into meta_state_: with no window-activate event on Android win->active
+-   * stays 0, so the window manager re-reads getModifierKeys() on every button event and would
+-   * otherwise cancel the modifier right back out. */
++  /* Synthetic Shift belongs to the pan gesture, independently of the physical keyboard. */
+   bool touch_shift_active_;
+ 
+   /* Finger touch: the button is decided after the press, so that holding still
+@@ -134,7 +138,7 @@ class GHOST_SystemAndroid : public GHOST_System {
+   /* Parks the cursor once a stylus has really left, see hover_exit_pending_. */
+   void hoverExitCheck();
+   void touchSendButton(GHOST_TButton mask, GHOST_TEventType type);
+-  /* Press/release the synthetic Shift, keeping meta_state_ in step. */
++  /* Press/release the synthetic Shift without releasing a physical Shift. */
+   void touchSendShift(bool down);
+   /* Release the three-finger pan, if one is running. */
+   void touchEndPan();
+@@ -159,13 +163,17 @@ class GHOST_SystemAndroid : public GHOST_System {
+   /* The Java IME callbacks run on the Android UI thread, while the event queue
+    * is only safe to touch from Blender's thread, so they are queued and drained
+    * in processEvents(). */
+-  struct JavaKeyEvent {
+-    int32_t keycode, action, meta_state;
++  struct JavaInputEvent {
++    enum class Type { Text, Key, KeyboardDisconnected };
++    Type type;
++    std::string text;
++    int32_t keycode = 0, action = 0, meta_state = 0;
+   };
+   void drainJavaInput();
+   void dispatchTextInput(const char *utf8_string);
+   void dispatchJavaKeyEvent(int32_t keycode, int32_t action, int32_t meta_state);
+   std::mutex java_input_mutex_;
+-  std::vector<std::string> java_text_;
+-  std::vector<JavaKeyEvent> java_keys_;
++  std::vector<JavaInputEvent> java_input_;
++  /* Protected by java_input_mutex_; discard callbacks from an unfocused activity. */
++  bool java_input_enabled_ = true;
+ };
+diff --git a/source/blender/windowmanager/intern/wm_event_system.cc b/source/blender/windowmanager/intern/wm_event_system.cc
+index 47c441a..37c7faa 100644
+--- a/source/blender/windowmanager/intern/wm_event_system.cc
++++ b/source/blender/windowmanager/intern/wm_event_system.cc
+@@ -6438,6 +6438,10 @@ void wm_event_add_ghostevent(wmWindowManager *wm,
+         }
+       }
+ 
++      /* A physical key release must not clear an independently latched virtual modifier. This
++       * also keeps the next mouse/tablet event consistent with the virtual keyboard's display. */
++      event.modifier |= wm_virtual_keyboard_modifiers_get(win);
++
+       /* It's important `event.modifier` has been initialized first. */
+       wm_event_state_update_and_click_set(&event,
+                                           event_time_ms,
+diff --git a/source/blender/windowmanager/intern/wm_virtual_keyboard.cc b/source/blender/windowmanager/intern/wm_virtual_keyboard.cc
+index d96668e..85af258 100644
+--- a/source/blender/windowmanager/intern/wm_virtual_keyboard.cc
++++ b/source/blender/windowmanager/intern/wm_virtual_keyboard.cc
+@@ -321,6 +321,8 @@ static const float VK_MIN_HEIGHT = 150.0f;
+ struct VirtualKeyboard {
+   bool open = false;
+   wmWindow *win = nullptr;
++  /** Owner of the input queue, also needed when the public toggle closes the keyboard. */
++  wmWindowManager *wm = nullptr;
+   void *draw_handle = nullptr;
+ 
+   /** The panel, in window coordinates. */
+@@ -333,6 +335,8 @@ struct VirtualKeyboard {
+   /** Sticky modifiers, cleared after the next key, and the ones locked by a long press. */
+   uint8_t mods = 0;
+   uint8_t locked = 0;
++  /** External KM_* state in WM event order; GHOST may already have processed later releases. */
++  uint8_t external_modifiers = 0;
+ 
+   Vector<VKPlacedKey> keys;
+ 
+@@ -360,6 +364,41 @@ struct VirtualKeyboard {
+ /* Android hands out exactly one window, and a second keyboard would have nothing to attach to. */
+ static VirtualKeyboard g_vk;
+ 
++static uint8_t vk_modifier_flag(int slot)
++{
++  switch (slot) {
++    case VK_MOD_CTRL:
++      return KM_CTRL;
++    case VK_MOD_SHIFT:
++      return KM_SHIFT;
++    case VK_MOD_ALT:
++      return KM_ALT;
++    default:
++      return 0;
++  }
++}
++
++uint8_t wm_virtual_keyboard_modifiers_get(const wmWindow *win)
++{
++  if (!g_vk.open || g_vk.win != win) {
++    return 0;
++  }
++  uint8_t modifiers = 0;
++  for (int slot = 0; slot < VK_MOD_NUM; slot++) {
++    if (g_vk.mods & (1 << slot)) {
++      modifiers |= vk_modifier_flag(slot);
++    }
++  }
++  return modifiers;
++}
++
++void wm_virtual_keyboard_external_modifiers_set(const wmWindow *win, const uint8_t modifiers)
++{
++  if (g_vk.open && g_vk.win == win) {
++    g_vk.external_modifiers = modifiers;
++  }
++}
++
+ /** The interface resolution scale, which the keyboard sizes its text and its bar against. */
+ static float vk_scale()
+ {
+@@ -1028,12 +1067,36 @@ static void vk_send_ghost_key(wmWindowManager *wm,
+       wm, win, down ? GHOST_kEventKeyDown : GHOST_kEventKeyUp, &kdata, vk_event_time_ms());
+ }
+ 
++/**
++ * Update only modifier slots whose virtual ownership changed. A physical key or a synthetic touch
++ * gesture can own the same modifier, so dropping a virtual latch must not release either one.
++ */
++static void vk_sync_modifiers(VirtualKeyboard &vk, const uint8_t previous_mods)
++{
++  const uint8_t changed = previous_mods ^ vk.mods;
++  if (changed == 0 || vk.wm == nullptr) {
++    return;
++  }
++
++  for (int slot = 0; slot < VK_MOD_NUM; slot++) {
++    if ((changed & (1 << slot)) == 0) {
++      continue;
++    }
++    const bool external_down = (vk.external_modifiers & vk_modifier_flag(slot)) != 0;
++    const bool down = vk_mod_is_on(vk, slot) || external_down;
++    const bool was_down = (vk.win->runtime->eventstate->modifier & vk_modifier_flag(slot)) != 0;
++    if (down != was_down) {
++      vk_send_ghost_key(vk.wm, vk.win, vk_modifier_ghost_key(slot), nullptr, down);
++    }
++  }
++}
++
+ /**
+  * Turn a tapped key into the press and release a hardware keyboard would have sent.
+  *
+- * The modifiers are sent as their own key events around it, so the event that carries the letter
+- * carries the modifier state as well and the keymap resolves it exactly as it would for a physical
+- * combination. Sticky modifiers are dropped afterwards unless they were locked.
++ * Virtual modifiers are already held in the window's input state, where they also apply to physical
++ * keys and pointer events. Sticky modifiers are dropped after a virtual key unless locked; using a
++ * physical key or pointer deliberately leaves them enabled until tapped again.
+  */
+ static void vk_send_key(VirtualKeyboard &vk, wmWindowManager *wm, wmWindow *win, const VKKeySpec &spec)
+ {
+@@ -1043,7 +1106,7 @@ static void vk_send_key(VirtualKeyboard &vk, wmWindowManager *wm, wmWindow *win,
+   vk_target_position(vk, win, target);
+   copy_v2_v2_int(win->runtime->eventstate->xy, target);
+ 
+-  const bool shift = vk_mod_is_on(vk, VK_MOD_SHIFT);
++  const bool shift = (win->runtime->eventstate->modifier & KM_SHIFT) != 0;
+   const char *utf8 = shift ? spec.utf8_shift : spec.utf8;
+ 
+   /* Name it for the bar, so a tap says what it sent even when the key is under a finger. */
+@@ -1058,22 +1121,12 @@ static void vk_send_key(VirtualKeyboard &vk, wmWindowManager *wm, wmWindow *win,
+     vk.last_key_time = BLI_time_now_seconds();
+   }
+ 
+-  for (int slot = 0; slot < VK_MOD_NUM; slot++) {
+-    if (vk_mod_is_on(vk, slot)) {
+-      vk_send_ghost_key(wm, win, vk_modifier_ghost_key(slot), nullptr, true);
+-    }
+-  }
+-
+   vk_send_ghost_key(wm, win, GHOST_TKey(spec.code), utf8, true);
+   vk_send_ghost_key(wm, win, GHOST_TKey(spec.code), nullptr, false);
+ 
+-  for (int slot = VK_MOD_NUM - 1; slot >= 0; slot--) {
+-    if (vk_mod_is_on(vk, slot)) {
+-      vk_send_ghost_key(wm, win, vk_modifier_ghost_key(slot), nullptr, false);
+-    }
+-  }
+-
++  const uint8_t previous_mods = vk.mods;
+   vk.mods = vk.locked;
++  vk_sync_modifiers(vk, previous_mods);
+ }
+ 
+ /** \} */
+@@ -1088,17 +1141,21 @@ static void vk_close(wmWindow *win)
+   if (!vk.open) {
+     return;
+   }
++  const uint8_t previous_mods = vk.mods;
++  vk.mods = 0;
++  vk.locked = 0;
++  vk_sync_modifiers(vk, previous_mods);
+   if (vk.draw_handle != nullptr) {
+     WM_draw_cb_exit(vk.win, vk.draw_handle);
+     vk.draw_handle = nullptr;
+   }
+   vk.open = false;
+   vk.win = nullptr;
++  vk.wm = nullptr;
++  vk.external_modifiers = 0;
+   vk.keys.clear();
+   vk.text_edit = nullptr;
+   vk.last_key[0] = '\0';
+-  vk.mods = 0;
+-  vk.locked = 0;
+   vk.hover = -1;
+   vk.pressed = -1;
+   vk.moving = false;
+@@ -1113,6 +1170,8 @@ static void vk_open(wmWindow *win)
+   }
+   vk.open = true;
+   vk.win = win;
++  vk.wm = nullptr;
++  vk.external_modifiers = win->runtime->eventstate->modifier;
+   vk.layer = 0;
+   vk.offset = 0.0f;
+   vk.text_edit = nullptr;
+@@ -1166,8 +1225,15 @@ void wm_virtual_keyboard_window_close(wmWindow *win)
+     g_vk.draw_handle = nullptr;
+     g_vk.open = false;
+     g_vk.win = nullptr;
++    g_vk.wm = nullptr;
++    g_vk.external_modifiers = 0;
+     g_vk.keys.clear();
+     g_vk.text_edit = nullptr;
++    g_vk.mods = 0;
++    g_vk.locked = 0;
++    g_vk.hover = -1;
++    g_vk.pressed = -1;
++    g_vk.moving = false;
+   }
+ }
+ 
+@@ -1212,6 +1278,7 @@ static void vk_release(VirtualKeyboard &vk, wmWindowManager *wm, wmWindow *win)
+         vk.layer = spec.code;
+         break;
+       case VKKind::Mod: {
++        const uint8_t previous_mods = vk.mods;
+         const uint8_t bit = uint8_t(1 << spec.code);
+         if (held >= VK_LONG_PRESS_SECONDS) {
+           /* Held: lock it until it is tapped again. */
+@@ -1234,6 +1301,7 @@ static void vk_release(VirtualKeyboard &vk, wmWindowManager *wm, wmWindow *win)
+         else {
+           vk.mods |= bit;
+         }
++        vk_sync_modifiers(vk, previous_mods);
+         break;
+       }
+       case VKKind::Key:
+@@ -1284,9 +1352,58 @@ bool wm_virtual_keyboard_ghost_event(wmWindowManager *wm,
+   if (!vk.open || vk.win != win) {
+     return false;
+   }
++  vk.wm = wm;
++  if (type == GHOST_kEventWindowDeactivate) {
++    /* Clear virtual ownership before wm_window releases the effective modifiers. Also cancel a
++     * press interrupted by Android's activity pause so its later release cannot type a key. */
++    vk.mods = 0;
++    vk.locked = 0;
++    vk.external_modifiers = 0;
++    vk.hover = -1;
++    vk.pressed = -1;
++    vk.moving = false;
++    vk.last_key[0] = '\0';
++    vk_tag_redraw(win);
++    return false;
++  }
+   vk_ensure_layout(vk, win);
+ 
+   switch (type) {
++    case GHOST_kEventKeyDown:
++    case GHOST_kEventKeyUp: {
++      const GHOST_TEventKeyData *kd = static_cast<const GHOST_TEventKeyData *>(customdata);
++      int slot = -1;
++      switch (kd->key) {
++        case GHOST_kKeyLeftControl:
++        case GHOST_kKeyRightControl:
++          slot = VK_MOD_CTRL;
++          break;
++        case GHOST_kKeyLeftShift:
++        case GHOST_kKeyRightShift:
++          slot = VK_MOD_SHIFT;
++          break;
++        case GHOST_kKeyLeftAlt:
++        case GHOST_kKeyRightAlt:
++          slot = VK_MOD_ALT;
++          break;
++        default:
++          break;
++      }
++      /* GHOST retains external ownership independently. While a virtual latch owns the modifier,
++       * neither an extra press nor a release changes its effective state. In particular, a false
++       * Shift release would turn off precision in a running modal operator. */
++      if (slot != -1) {
++        const uint8_t flag = vk_modifier_flag(slot);
++        if (type == GHOST_kEventKeyDown) {
++          vk.external_modifiers |= flag;
++        }
++        else {
++          vk.external_modifiers &= ~flag;
++        }
++        return vk_mod_is_on(vk, slot);
++      }
++      return false;
++    }
+     case GHOST_kEventCursorMove: {
+       const GHOST_TEventCursorData *cd = static_cast<const GHOST_TEventCursorData *>(customdata);
+       int xy[2] = {cd->x, cd->y};
+diff --git a/source/blender/windowmanager/intern/wm_window.cc b/source/blender/windowmanager/intern/wm_window.cc
+index 3362db2..1b208f1 100644
+--- a/source/blender/windowmanager/intern/wm_window.cc
++++ b/source/blender/windowmanager/intern/wm_window.cc
+@@ -865,9 +865,12 @@ static void wm_window_update_eventstate_modifiers(wmWindowManager *wm,
+                                                   wmWindow *win,
+                                                   const uint64_t event_time_ms)
+ {
++  const uint8_t keymodifier_left = wm_ghost_modifier_query(MOD_SIDE_LEFT);
++  const uint8_t keymodifier_right = wm_ghost_modifier_query(MOD_SIDE_RIGHT);
++  wm_virtual_keyboard_external_modifiers_set(win, keymodifier_left | keymodifier_right);
+   const uint8_t keymodifier_sided[2] = {
+-      wm_ghost_modifier_query(MOD_SIDE_LEFT),
+-      wm_ghost_modifier_query(MOD_SIDE_RIGHT),
++      uint8_t(keymodifier_left | wm_virtual_keyboard_modifiers_get(win)),
++      keymodifier_right,
+   };
+   const uint8_t keymodifier = keymodifier_sided[0] | keymodifier_sided[1];
+   const uint8_t keymodifier_eventstate = win->runtime->eventstate->modifier;
+diff --git a/source/blender/windowmanager/wm.hh b/source/blender/windowmanager/wm.hh
+index c683eb1..ff0e7e6 100644
+--- a/source/blender/windowmanager/wm.hh
++++ b/source/blender/windowmanager/wm.hh
+@@ -8,6 +8,7 @@
+ 
+ #pragma once
+ 
++#include <cstdint>
+ #include <optional>
+ 
+ #include "BLI_compiler_attrs.hh"
+@@ -142,6 +143,10 @@ bool wm_virtual_keyboard_ghost_event(wmWindowManager *wm,
+                                      const void *customdata);
+ /** Drop the keyboard when the window it is drawn into goes away. */
+ void wm_virtual_keyboard_window_close(wmWindow *win);
++/** Latched virtual #KM_CTRL, #KM_SHIFT and #KM_ALT flags for this window, or zero when closed. */
++uint8_t wm_virtual_keyboard_modifiers_get(const wmWindow *win);
++/** Reconcile external ownership at the same boundary as WM's platform modifier query. */
++void wm_virtual_keyboard_external_modifiers_set(const wmWindow *win, uint8_t modifiers);
+ 
+ /**
+  * Initialize operator properties.
