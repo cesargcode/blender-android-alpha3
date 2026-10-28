@@ -1,5 +1,5 @@
 diff --git a/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java b/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java
-index e87d977..965d65d 100644
+index e87d977..b38c8d1 100644
 --- a/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java
 +++ b/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java
 @@ -6,6 +6,9 @@ package org.blender.blender;
@@ -12,7 +12,23 @@ index e87d977..965d65d 100644
  import android.content.Intent;
  import android.content.pm.ActivityInfo;
  import android.content.res.AssetManager;
-@@ -56,6 +59,54 @@ public class BlenderActivity extends NativeActivity {
+@@ -17,6 +20,7 @@ import android.util.Log;
+ import android.os.Environment;
+ import android.provider.Settings;
+ import android.text.InputType;
++import android.view.KeyCharacterMap;
+ import android.view.KeyEvent;
+ import android.view.View;
+ import android.view.ViewGroup;
+@@ -30,6 +34,7 @@ import java.io.File;
+ import java.io.FileOutputStream;
+ import java.io.InputStream;
+ import java.io.OutputStream;
++import java.nio.charset.StandardCharsets;
+ import java.util.zip.ZipEntry;
+ import java.util.zip.ZipInputStream;
+ 
+@@ -56,9 +61,111 @@ public class BlenderActivity extends NativeActivity {
    private static final String TAG = "Blender";
  
    private InputView inputView;
@@ -64,10 +80,69 @@ index e87d977..965d65d 100644
 +    }
 +    super.onDestroy();
 +  }
++
++  private native void nativeOnCommitText(byte[] utf8);
++  private native void nativeOnKey(
++      int keycode, int action, int metaState, int unicode, int repeatCount);
++
++  /* NativeActivity consumes physical keys in its native input queue, before
++   * Activity.dispatchKeyEvent. GHOST asks the device's Android key map for the
++   * text to attach to that same key event; forwarding another Java event would
++   * duplicate input. Preserve COMBINING_ACCENT for composition on Blender's thread. */
++  public int getKeyUnicode(int deviceId, int keycode, int metaState) {
++    try {
++      return KeyCharacterMap.load(deviceId).get(keycode, metaState);
++    }
++    catch (KeyCharacterMap.UnavailableException ex) {
++      return 0;
++    }
++  }
  
-   private native void nativeOnCommitText(String text);
-   private native void nativeOnKey(int keycode, int action, int metaState);
-@@ -82,6 +133,13 @@ public class BlenderActivity extends NativeActivity {
+-  private native void nativeOnCommitText(String text);
+-  private native void nativeOnKey(int keycode, int action, int metaState);
++  /* Also called from GHOST. Pending accents belong to its ordered event stream. */
++  public int composeKeyAccent(int accent, int codePoint) {
++    return KeyCharacterMap.getDeadChar(accent, codePoint);
++  }
++
++  private void commitInputText(CharSequence text) {
++    if (text != null && text.length() != 0) {
++      nativeOnCommitText(text.toString().getBytes(StandardCharsets.UTF_8));
++    }
++  }
++
++  private boolean forwardImeKeyEvent(KeyEvent event) {
++    final int action = event.getAction();
++    final int keycode = event.getKeyCode();
++    if (action == KeyEvent.ACTION_MULTIPLE) {
++      if (keycode == KeyEvent.KEYCODE_UNKNOWN) {
++        final String characters = event.getCharacters();
++        if (characters == null) {
++          return false;
++        }
++        commitInputText(characters);
++      }
++      else {
++        final int unicode = event.getUnicodeChar();
++        for (int i = 0; i < event.getRepeatCount(); i++) {
++          nativeOnKey(keycode, KeyEvent.ACTION_DOWN, event.getMetaState(), unicode, i);
++          nativeOnKey(keycode, KeyEvent.ACTION_UP, event.getMetaState(), 0, 0);
++        }
++      }
++      return true;
++    }
++    if (action != KeyEvent.ACTION_DOWN && action != KeyEvent.ACTION_UP) {
++      return false;
++    }
++    final boolean down = action == KeyEvent.ACTION_DOWN;
++    nativeOnKey(keycode, action, event.getMetaState(), down ? event.getUnicodeChar() : 0,
++                down ? event.getRepeatCount() : 0);
++    return true;
++  }
+   private native void nativeSetLogPath(String path);
+ 
+   private String logPath = null;
+@@ -82,6 +189,13 @@ public class BlenderActivity extends NativeActivity {
  
      inputView = new InputView(this);
      addContentView(inputView, new ViewGroup.LayoutParams(1, 1));
@@ -81,11 +156,44 @@ index e87d977..965d65d 100644
    }
  
    /* Scoped storage confines the app to its sandbox, but Blender opens and saves
+@@ -379,21 +493,27 @@ public class BlenderActivity extends NativeActivity {
+       return new BaseInputConnection(this, false) {
+         @Override
+         public boolean commitText(CharSequence text, int newCursorPosition) {
+-          nativeOnCommitText(text.toString());
++          commitInputText(text);
+           return true;
+         }
+ 
+         @Override
+         public boolean sendKeyEvent(KeyEvent event) {
+-          nativeOnKey(event.getKeyCode(), event.getAction(), event.getMetaState());
+-          return true;
++          return forwardImeKeyEvent(event);
+         }
+ 
+         @Override
+         public boolean deleteSurroundingText(int beforeLength, int afterLength) {
++          if (beforeLength < 0 || afterLength < 0) {
++            return false;
++          }
+           for (int i = 0; i < beforeLength; i++) {
+-            nativeOnKey(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_DOWN, 0);
+-            nativeOnKey(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_UP, 0);
++            nativeOnKey(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_DOWN, 0, 0, 0);
++            nativeOnKey(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_UP, 0, 0, 0);
++          }
++          for (int i = 0; i < afterLength; i++) {
++            nativeOnKey(KeyEvent.KEYCODE_FORWARD_DEL, KeyEvent.ACTION_DOWN, 0, 0, 0);
++            nativeOnKey(KeyEvent.KEYCODE_FORWARD_DEL, KeyEvent.ACTION_UP, 0, 0, 0);
+           }
+           return true;
+         }
 diff --git a/build_files/android/java/org/blender/blender/BlenderActivity.java b/build_files/android/java/org/blender/blender/BlenderActivity.java
-index a82c3ee..5b06432 100644
+index a82c3ee..db6069e 100644
 --- a/build_files/android/java/org/blender/blender/BlenderActivity.java
 +++ b/build_files/android/java/org/blender/blender/BlenderActivity.java
-@@ -6,6 +6,9 @@ package org.blender.blender;
+@@ -6,9 +6,13 @@ package org.blender.blender;
  
  import android.app.NativeActivity;
  import android.content.Context;
@@ -95,7 +203,20 @@ index a82c3ee..5b06432 100644
  import android.content.pm.ActivityInfo;
  import android.os.Bundle;
  import android.text.InputType;
-@@ -25,6 +28,54 @@ import android.view.inputmethod.InputMethodManager;
++import android.view.KeyCharacterMap;
+ import android.view.KeyEvent;
+ import android.view.View;
+ import android.view.ViewGroup;
+@@ -17,6 +21,8 @@ import android.view.inputmethod.EditorInfo;
+ import android.view.inputmethod.InputConnection;
+ import android.view.inputmethod.InputMethodManager;
+ 
++import java.nio.charset.StandardCharsets;
++
+ /**
+  * NativeActivity subclass that bridges soft-keyboard (IME) text into GHOST.
+  * NativeActivity's surface has no InputConnection, so a tiny focusable proxy
+@@ -25,9 +31,111 @@ import android.view.inputmethod.InputMethodManager;
  public class BlenderActivity extends NativeActivity {
  
    private InputView inputView;
@@ -147,10 +268,69 @@ index a82c3ee..5b06432 100644
 +    }
 +    super.onDestroy();
 +  }
++
++  private native void nativeOnCommitText(byte[] utf8);
++  private native void nativeOnKey(
++      int keycode, int action, int metaState, int unicode, int repeatCount);
  
-   private native void nativeOnCommitText(String text);
-   private native void nativeOnKey(int keycode, int action, int metaState);
-@@ -36,6 +87,13 @@ public class BlenderActivity extends NativeActivity {
+-  private native void nativeOnCommitText(String text);
+-  private native void nativeOnKey(int keycode, int action, int metaState);
++  /* NativeActivity consumes physical keys in its native input queue, before
++   * Activity.dispatchKeyEvent. GHOST asks the device's Android key map for the
++   * text to attach to that same key event; forwarding another Java event would
++   * duplicate input. Preserve COMBINING_ACCENT for composition on Blender's thread. */
++  public int getKeyUnicode(int deviceId, int keycode, int metaState) {
++    try {
++      return KeyCharacterMap.load(deviceId).get(keycode, metaState);
++    }
++    catch (KeyCharacterMap.UnavailableException ex) {
++      return 0;
++    }
++  }
++
++  /* Also called from GHOST. Pending accents belong to its ordered event stream. */
++  public int composeKeyAccent(int accent, int codePoint) {
++    return KeyCharacterMap.getDeadChar(accent, codePoint);
++  }
++
++  private void commitInputText(CharSequence text) {
++    if (text != null && text.length() != 0) {
++      nativeOnCommitText(text.toString().getBytes(StandardCharsets.UTF_8));
++    }
++  }
++
++  private boolean forwardImeKeyEvent(KeyEvent event) {
++    final int action = event.getAction();
++    final int keycode = event.getKeyCode();
++    if (action == KeyEvent.ACTION_MULTIPLE) {
++      if (keycode == KeyEvent.KEYCODE_UNKNOWN) {
++        final String characters = event.getCharacters();
++        if (characters == null) {
++          return false;
++        }
++        commitInputText(characters);
++      }
++      else {
++        final int unicode = event.getUnicodeChar();
++        for (int i = 0; i < event.getRepeatCount(); i++) {
++          nativeOnKey(keycode, KeyEvent.ACTION_DOWN, event.getMetaState(), unicode, i);
++          nativeOnKey(keycode, KeyEvent.ACTION_UP, event.getMetaState(), 0, 0);
++        }
++      }
++      return true;
++    }
++    if (action != KeyEvent.ACTION_DOWN && action != KeyEvent.ACTION_UP) {
++      return false;
++    }
++    final boolean down = action == KeyEvent.ACTION_DOWN;
++    nativeOnKey(keycode, action, event.getMetaState(), down ? event.getUnicodeChar() : 0,
++                down ? event.getRepeatCount() : 0);
++    return true;
++  }
+ 
+   @Override
+   protected void onCreate(Bundle state) {
+@@ -36,6 +144,13 @@ public class BlenderActivity extends NativeActivity {
  
      inputView = new InputView(this);
      addContentView(inputView, new ViewGroup.LayoutParams(1, 1));
@@ -164,30 +344,118 @@ index a82c3ee..5b06432 100644
    }
  
    /* Called from native (popupOnScreenKeyboard). */
+@@ -77,21 +192,27 @@ public class BlenderActivity extends NativeActivity {
+       return new BaseInputConnection(this, false) {
+         @Override
+         public boolean commitText(CharSequence text, int newCursorPosition) {
+-          nativeOnCommitText(text.toString());
++          commitInputText(text);
+           return true;
+         }
+ 
+         @Override
+         public boolean sendKeyEvent(KeyEvent event) {
+-          nativeOnKey(event.getKeyCode(), event.getAction(), event.getMetaState());
+-          return true;
++          return forwardImeKeyEvent(event);
+         }
+ 
+         @Override
+         public boolean deleteSurroundingText(int beforeLength, int afterLength) {
++          if (beforeLength < 0 || afterLength < 0) {
++            return false;
++          }
+           for (int i = 0; i < beforeLength; i++) {
+-            nativeOnKey(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_DOWN, 0);
+-            nativeOnKey(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_UP, 0);
++            nativeOnKey(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_DOWN, 0, 0, 0);
++            nativeOnKey(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_UP, 0, 0, 0);
++          }
++          for (int i = 0; i < afterLength; i++) {
++            nativeOnKey(KeyEvent.KEYCODE_FORWARD_DEL, KeyEvent.ACTION_DOWN, 0, 0, 0);
++            nativeOnKey(KeyEvent.KEYCODE_FORWARD_DEL, KeyEvent.ACTION_UP, 0, 0, 0);
+           }
+           return true;
+         }
 diff --git a/intern/ghost/intern/GHOST_AndroidMain.cc b/intern/ghost/intern/GHOST_AndroidMain.cc
-index f927b79..c9d8513 100644
+index f927b79..2c58111 100644
 --- a/intern/ghost/intern/GHOST_AndroidMain.cc
 +++ b/intern/ghost/intern/GHOST_AndroidMain.cc
-@@ -308,6 +308,14 @@ extern "C" JNIEXPORT void JNICALL Java_org_blender_blender_BlenderActivity_nativ
+@@ -275,15 +275,24 @@ static GHOST_SystemAndroid *android_system_if_ready()
+ 
+ /* Soft-keyboard text/keys from the Java InputConnection (BlenderActivity). */
+ extern "C" JNIEXPORT void JNICALL Java_org_blender_blender_BlenderActivity_nativeOnCommitText(
+-    JNIEnv *env, jobject /*thiz*/, jstring text)
++    JNIEnv *env, jobject /*thiz*/, jbyteArray utf8)
+ {
+   GHOST_SystemAndroid *system = android_system_if_ready();
+-  if (!system || !text) {
++  if (!system || !utf8) {
+     return;
    }
+-  const char *utf = env->GetStringUTFChars(text, nullptr);
+-  system->handleTextInput(utf);
+-  env->ReleaseStringUTFChars(text, utf);
++  /* Java encodes standard UTF-8. GetStringUTFChars would instead produce JNI's
++   * modified UTF-8, which splits supplementary characters into invalid UTF-8. */
++  const jsize length = env->GetArrayLength(utf8);
++  if (length == 0) {
++    return;
++  }
++  std::string text(size_t(length), '\0');
++  env->GetByteArrayRegion(utf8, 0, length, reinterpret_cast<jbyte *>(text.data()));
++  if (env->ExceptionCheck()) {
++    return;
++  }
++  system->handleTextInput(text.c_str());
  }
  
-+extern "C" JNIEXPORT void JNICALL
-+Java_org_blender_blender_BlenderActivity_nativeOnKeyboardDisconnected(JNIEnv *, jobject)
+ /* Called before the native activity starts, so the path is known by the time
+@@ -301,10 +310,24 @@ extern "C" JNIEXPORT void JNICALL Java_org_blender_blender_BlenderActivity_nativ
+ }
+ 
+ extern "C" JNIEXPORT void JNICALL Java_org_blender_blender_BlenderActivity_nativeOnKey(
+-    JNIEnv * /*env*/, jobject /*thiz*/, jint keycode, jint action, jint meta_state)
++    JNIEnv * /*env*/,
++    jobject /*thiz*/,
++    jint keycode,
++    jint action,
++    jint meta_state,
++    jint unicode,
++    jint repeat_count)
 +{
 +  if (GHOST_SystemAndroid *system = android_system_if_ready()) {
-+    system->handleKeyboardDisconnected();
++    system->handleJavaKeyEvent(keycode, action, meta_state, unicode, repeat_count);
 +  }
 +}
 +
- extern "C" void android_main(struct android_app *app)
++extern "C" JNIEXPORT void JNICALL
++Java_org_blender_blender_BlenderActivity_nativeOnKeyboardDisconnected(JNIEnv *, jobject)
  {
-   ghost_android_open_log(app);
+   if (GHOST_SystemAndroid *system = android_system_if_ready()) {
+-    system->handleJavaKeyEvent(keycode, action, meta_state);
++    system->handleKeyboardDisconnected();
+   }
+ }
+ 
 diff --git a/intern/ghost/intern/GHOST_SystemAndroid.cc b/intern/ghost/intern/GHOST_SystemAndroid.cc
-index ae9cf24..022c3ff 100644
+index ae9cf24..ec49ffc 100644
 --- a/intern/ghost/intern/GHOST_SystemAndroid.cc
 +++ b/intern/ghost/intern/GHOST_SystemAndroid.cc
-@@ -51,6 +51,94 @@ static constexpr int32_t TOUCH_LONG_PRESS_MOVE_PX = 16;
+@@ -36,6 +36,12 @@
+ 
+ static android_app *g_android_app = nullptr;
+ 
++static int32_t android_key_unicode(android_app *app,
++                                   int32_t device_id,
++                                   int32_t keycode,
++                                   int32_t meta_state);
++static int32_t android_compose_key_accent(android_app *app, int32_t accent, int32_t unicode);
++
+ /* Hold a finger this long without moving to get a right-click. */
+ static constexpr uint64_t TOUCH_LONG_PRESS_MS = 500;
+ /* Movement past this (in pixels) makes the press a left-button drag. Sized for a
+@@ -51,6 +57,95 @@ static constexpr int32_t TOUCH_LONG_PRESS_MOVE_PX = 16;
   * on them is what made every attempt to scroll a panel zoom it instead. */
  static constexpr float GESTURE_DECIDE_PX = 24.0f;
  
@@ -276,13 +544,14 @@ index ae9cf24..022c3ff 100644
 +void GHOST_SystemAndroid::resetPhysicalModifiers()
 +{
 +  meta_state_ = 0;
++  pending_accent_ = 0;
 +  syncModifierEvents();
 +}
 +
  GHOST_SystemAndroid::GHOST_SystemAndroid()
      : app_(g_android_app),
        window_(nullptr),
-@@ -228,9 +316,36 @@ void GHOST_SystemAndroid::handleNativeWindowInit(android_app *app)
+@@ -228,9 +323,36 @@ void GHOST_SystemAndroid::handleNativeWindowInit(android_app *app)
  
  void GHOST_SystemAndroid::handleWindowFocus(bool gained)
  {
@@ -319,7 +588,7 @@ index ae9cf24..022c3ff 100644
    /* Without this the window manager never learns the window is active, and it then treats every
     * button event as arriving at a window that is being entered: it takes the cursor position from
     * GHOST at that moment and writes it over the position the event carries.
-@@ -296,9 +411,11 @@ static GHOST_TabletData tablet_from_event(AInputEvent *event)
+@@ -296,9 +418,11 @@ static GHOST_TabletData tablet_from_event(AInputEvent *event)
  
  int32_t GHOST_SystemAndroid::handleInputEvent(AInputEvent *event)
  {
@@ -332,7 +601,7 @@ index ae9cf24..022c3ff 100644
    switch (AInputEvent_getType(event)) {
      case AINPUT_EVENT_TYPE_KEY:
        return handleKeyEvent(event);
-@@ -324,7 +441,7 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
+@@ -324,7 +448,7 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
      const int32_t y = int32_t(ghost_android_scale_input(AMotionEvent_getY(event, 0)));
      cursor_x_ = x;
      cursor_y_ = y;
@@ -341,7 +610,7 @@ index ae9cf24..022c3ff 100644
      pushEvent(std::make_unique<GHOST_EventCursor>(
          getMilliSeconds(), GHOST_kEventCursorMove, window_, x, y, GHOST_TABLET_DATA_NONE));
  
-@@ -485,7 +602,6 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
+@@ -485,7 +609,6 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
                                                tablet_from_event(event);
    int32_t x = int32_t(ghost_android_scale_input(AMotionEvent_getX(event, 0)));
    int32_t y = int32_t(ghost_android_scale_input(AMotionEvent_getY(event, 0)));
@@ -349,7 +618,7 @@ index ae9cf24..022c3ff 100644
  
    /* A pointer that leaves proximity simply stops sending events, so reporting its last
     * position keeps the button under it highlighted and its tooltip on screen forever.
-@@ -595,20 +711,7 @@ void GHOST_SystemAndroid::touchSendShift(bool down)
+@@ -595,20 +718,7 @@ void GHOST_SystemAndroid::touchSendShift(bool down)
      return;
    }
    touch_shift_active_ = down;
@@ -371,10 +640,66 @@ index ae9cf24..022c3ff 100644
  }
  
  void GHOST_SystemAndroid::touchEndPan()
-@@ -698,6 +801,22 @@ static GHOST_TKey convertAndroidKey(int32_t keycode)
+@@ -676,7 +786,51 @@ static GHOST_TKey convertAndroidKey(int32_t keycode)
+   if (keycode >= AKEYCODE_0 && keycode <= AKEYCODE_9) {
+     return GHOST_TKey(GHOST_kKey0 + (keycode - AKEYCODE_0));
+   }
++  if (keycode >= AKEYCODE_NUMPAD_0 && keycode <= AKEYCODE_NUMPAD_9) {
++    return GHOST_TKey(GHOST_kKeyNumpad0 + (keycode - AKEYCODE_NUMPAD_0));
++  }
++  if (keycode >= AKEYCODE_F1 && keycode <= AKEYCODE_F12) {
++    return GHOST_TKey(GHOST_kKeyF1 + (keycode - AKEYCODE_F1));
++  }
+   switch (keycode) {
++    case AKEYCODE_COMMA:
++      return GHOST_kKeyComma;
++    case AKEYCODE_PERIOD:
++      return GHOST_kKeyPeriod;
++    case AKEYCODE_GRAVE:
++      return GHOST_kKeyAccentGrave;
++    case AKEYCODE_MINUS:
++      return GHOST_kKeyMinus;
++    case AKEYCODE_EQUALS:
++    case AKEYCODE_NUMPAD_EQUALS:
++      return GHOST_kKeyEqual;
++    case AKEYCODE_LEFT_BRACKET:
++      return GHOST_kKeyLeftBracket;
++    case AKEYCODE_RIGHT_BRACKET:
++      return GHOST_kKeyRightBracket;
++    case AKEYCODE_BACKSLASH:
++      return GHOST_kKeyBackslash;
++    case AKEYCODE_SEMICOLON:
++      return GHOST_kKeySemicolon;
++    case AKEYCODE_APOSTROPHE:
++      return GHOST_kKeyQuote;
++    case AKEYCODE_SLASH:
++      return GHOST_kKeySlash;
++    case AKEYCODE_PLUS:
++      return GHOST_kKeyPlus;
++    case AKEYCODE_NUMPAD_DOT:
++    case AKEYCODE_NUMPAD_COMMA:
++      return GHOST_kKeyNumpadPeriod;
++    case AKEYCODE_NUMPAD_ADD:
++      return GHOST_kKeyNumpadPlus;
++    case AKEYCODE_NUMPAD_SUBTRACT:
++      return GHOST_kKeyNumpadMinus;
++    case AKEYCODE_NUMPAD_MULTIPLY:
++      return GHOST_kKeyNumpadAsterisk;
++    case AKEYCODE_NUMPAD_DIVIDE:
++      return GHOST_kKeyNumpadSlash;
++    case AKEYCODE_NUMPAD_ENTER:
++      return GHOST_kKeyNumpadEnter;
+     case AKEYCODE_SPACE:
+       return GHOST_kKeySpace;
+     case AKEYCODE_ENTER:
+@@ -698,25 +852,164 @@ static GHOST_TKey convertAndroidKey(int32_t keycode)
        return GHOST_kKeyUpArrow;
      case AKEYCODE_DPAD_DOWN:
        return GHOST_kKeyDownArrow;
++    case AKEYCODE_MOVE_HOME:
++      return GHOST_kKeyHome;
++    case AKEYCODE_MOVE_END:
++      return GHOST_kKeyEnd;
 +    case AKEYCODE_SHIFT_LEFT:
 +      return GHOST_kKeyLeftShift;
 +    case AKEYCODE_SHIFT_RIGHT:
@@ -394,31 +719,153 @@ index ae9cf24..022c3ff 100644
      default:
        return GHOST_kKeyUnknown;
    }
-@@ -705,12 +824,20 @@ static GHOST_TKey convertAndroidKey(int32_t keycode)
+ }
  
- int32_t GHOST_SystemAndroid::handleKeyEvent(AInputEvent *event)
+-int32_t GHOST_SystemAndroid::handleKeyEvent(AInputEvent *event)
++/* Only Unicode scalar values that represent text belong in GHOST's six-byte buffer. */
++static bool android_unicode_to_utf8(int32_t unicode, char utf8[6])
  {
 -  meta_state_ = AKeyEvent_getMetaState(event);
 -  const GHOST_TKey key = convertAndroidKey(AKeyEvent_getKeyCode(event));
+-  if (key == GHOST_kKeyUnknown) {
++  memset(utf8, 0, 6);
++  if (unicode < 0x20 || (unicode >= 0x7f && unicode <= 0x9f) ||
++      (unicode >= 0xd800 && unicode <= 0xdfff) || unicode > 0x10ffff)
++  {
++    return false;
++  }
++  if (unicode < 0x80) {
++    utf8[0] = char(unicode);
++  }
++  else if (unicode < 0x800) {
++    utf8[0] = char(0xc0 | (unicode >> 6));
++    utf8[1] = char(0x80 | (unicode & 0x3f));
++  }
++  else if (unicode < 0x10000) {
++    utf8[0] = char(0xe0 | (unicode >> 12));
++    utf8[1] = char(0x80 | ((unicode >> 6) & 0x3f));
++    utf8[2] = char(0x80 | (unicode & 0x3f));
++  }
++  else {
++    utf8[0] = char(0xf0 | (unicode >> 18));
++    utf8[1] = char(0x80 | ((unicode >> 12) & 0x3f));
++    utf8[2] = char(0x80 | ((unicode >> 6) & 0x3f));
++    utf8[3] = char(0x80 | (unicode & 0x3f));
++  }
++  return true;
++}
++
++int32_t GHOST_SystemAndroid::dispatchKeyEvent(int32_t keycode,
++                                             int32_t action,
++                                             int32_t meta_state,
++                                             int32_t unicode,
++                                             int32_t repeat_count,
++                                             int32_t device_id)
++{
++  if (!window_ || (action != AKEY_EVENT_ACTION_DOWN && action != AKEY_EVENT_ACTION_UP)) {
+     return 0;
+   }
+-  const bool down = AKeyEvent_getAction(event) == AKEY_EVENT_ACTION_DOWN;
+-  const bool repeat = AKeyEvent_getRepeatCount(event) > 0;
+-  pushEvent(std::make_unique<GHOST_EventKey>(
+-      getMilliSeconds(), down ? GHOST_kEventKeyDown : GHOST_kEventKeyUp, window_, key, repeat));
++  const bool down = action == AKEY_EVENT_ACTION_DOWN;
++  const GHOST_TKey key = convertAndroidKey(keycode);
++  char utf8[6] = {0};
++  if (down) {
++    /* Ctrl/Meta shortcuts must not insert text. Right Alt may be AltGr, including
++     * layouts whose device reports Ctrl+AltGr. Leave its character to Android. */
++    const bool shortcut = (meta_state & (AMETA_META_ON | AMETA_META_LEFT_ON |
++                                        AMETA_META_RIGHT_ON)) ||
++                          ((meta_state & (AMETA_CTRL_ON | AMETA_CTRL_LEFT_ON |
++                                          AMETA_CTRL_RIGHT_ON)) &&
++                           !(meta_state & AMETA_ALT_RIGHT_ON));
++    if (shortcut || pending_accent_device_ != device_id) {
++      pending_accent_ = 0;
++    }
++    if (shortcut) {
++      unicode = 0;
++    }
++    /* KeyCharacterMap marks dead keys in bit 31; the remaining bits are the
++     * spacing accent. Keep composition local to this device, on key-down only. */
++    const bool dead_key = (uint32_t(unicode) & 0x80000000u) != 0;
++    int32_t character = dead_key ? int32_t(uint32_t(unicode) & 0x7fffffffu) : unicode;
++    char character_utf8[6];
++    if (android_unicode_to_utf8(character, character_utf8)) {
++      if (pending_accent_) {
++        const int32_t composed = android_compose_key_accent(app_, pending_accent_, character);
++        if (composed && android_unicode_to_utf8(composed, utf8)) {
++          pending_accent_ = 0;
++        }
++        else {
++          /* No composition exists: deliver the previous accent before this key's
++           * text instead of silently losing it. The current key keeps its identity. */
++          char accent_utf8[6];
++          if (android_unicode_to_utf8(pending_accent_, accent_utf8)) {
++            /* This delayed character has no new physical key: avoid inventing an
++             * A key that could trigger an unrelated shortcut outside a text field. */
++            pushEvent(std::make_unique<GHOST_EventKey>(getMilliSeconds(),
++                                                     GHOST_kEventKeyDown,
++                                                     window_, GHOST_kKeyUnknown, false,
++                                                     accent_utf8));
++            pushEvent(std::make_unique<GHOST_EventKey>(getMilliSeconds(),
++                                                     GHOST_kEventKeyUp,
++                                                     window_, GHOST_kKeyUnknown, false));
++          }
++          pending_accent_ = 0;
++          if (dead_key) {
++            pending_accent_ = character;
++          }
++          else {
++            memcpy(utf8, character_utf8, sizeof(utf8));
++          }
++        }
++      }
++      else if (dead_key) {
++        pending_accent_ = character;
++      }
++      else {
++        memcpy(utf8, character_utf8, sizeof(utf8));
++      }
++      pending_accent_device_ = device_id;
++    }
++    else {
++      /* Navigation/edit commands and failed character lookups end composition. */
++      pending_accent_ = 0;
++    }
++  }
++  if (key == GHOST_kKeyUnknown && !utf8[0]) {
++    return 0;
++  }
++  pushEvent(std::make_unique<GHOST_EventKey>(getMilliSeconds(),
++                                           down ? GHOST_kEventKeyDown : GHOST_kEventKeyUp,
++                                           window_, key, down && repeat_count > 0, utf8));
+   return 1;
+ }
+ 
++int32_t GHOST_SystemAndroid::handleKeyEvent(AInputEvent *event)
++{
 +  const int32_t action = AKeyEvent_getAction(event);
 +  if (action != AKEY_EVENT_ACTION_DOWN && action != AKEY_EVENT_ACTION_UP) {
 +    return 0;
 +  }
 +  const int32_t keycode = AKeyEvent_getKeyCode(event);
-+  updatePhysicalModifiers(keycode, action, AKeyEvent_getMetaState(event));
++  const int32_t meta_state = AKeyEvent_getMetaState(event);
++  updatePhysicalModifiers(keycode, action, meta_state);
 +  if (is_android_modifier(keycode)) {
 +    return 1;
 +  }
-+  const GHOST_TKey key = convertAndroidKey(keycode);
-   if (key == GHOST_kKeyUnknown) {
-     return 0;
-   }
--  const bool down = AKeyEvent_getAction(event) == AKEY_EVENT_ACTION_DOWN;
-+  const bool down = action == AKEY_EVENT_ACTION_DOWN;
-   const bool repeat = AKeyEvent_getRepeatCount(event) > 0;
-   pushEvent(std::make_unique<GHOST_EventKey>(
-       getMilliSeconds(), down ? GHOST_kEventKeyDown : GHOST_kEventKeyUp, window_, key, repeat));
-@@ -741,32 +868,47 @@ void GHOST_SystemAndroid::handleTextInput(const char *utf8_string)
++  const int32_t device_id = AInputEvent_getDeviceId(event);
++  const int32_t unicode = action == AKEY_EVENT_ACTION_DOWN ?
++                              android_key_unicode(app_, device_id, keycode, meta_state) : 0;
++  return dispatchKeyEvent(
++      keycode, action, meta_state, unicode, AKeyEvent_getRepeatCount(event), device_id);
++}
++
+ /* Byte length of the UTF-8 character starting at a lead byte. */
+ static int utf8_char_len(unsigned char lead)
+ {
+@@ -741,32 +1034,54 @@ void GHOST_SystemAndroid::handleTextInput(const char *utf8_string)
      return;
    }
    std::scoped_lock lock(java_input_mutex_);
@@ -428,12 +875,18 @@ index ae9cf24..022c3ff 100644
 +  }
  }
  
- void GHOST_SystemAndroid::handleJavaKeyEvent(int32_t keycode, int32_t action, int32_t meta_state)
+-void GHOST_SystemAndroid::handleJavaKeyEvent(int32_t keycode, int32_t action, int32_t meta_state)
++void GHOST_SystemAndroid::handleJavaKeyEvent(int32_t keycode,
++                                            int32_t action,
++                                            int32_t meta_state,
++                                            int32_t unicode,
++                                            int32_t repeat_count)
  {
    std::scoped_lock lock(java_input_mutex_);
 -  java_keys_.push_back({keycode, action, meta_state});
 +  if (java_input_enabled_) {
-+    java_input_.push_back({JavaInputEvent::Type::Key, {}, keycode, action, meta_state});
++    java_input_.push_back(
++        {JavaInputEvent::Type::Key, {}, keycode, action, meta_state, unicode, repeat_count});
 +  }
 +}
 +
@@ -457,21 +910,23 @@ index ae9cf24..022c3ff 100644
 -    }
 -    text.swap(java_text_);
 -    keys.swap(java_keys_);
-+    input.swap(java_input_);
-   }
+-  }
 -  for (const std::string &string : text) {
 -    dispatchTextInput(string.c_str());
--  }
++    input.swap(java_input_);
+   }
 -  for (const JavaKeyEvent &key : keys) {
 -    dispatchJavaKeyEvent(key.keycode, key.action, key.meta_state);
 +  /* One FIFO preserves edits such as Backspace followed by replacement text. */
 +  for (const JavaInputEvent &event : input) {
 +    switch (event.type) {
 +      case JavaInputEvent::Type::Text:
++        pending_accent_ = 0;
 +        dispatchTextInput(event.text.c_str());
 +        break;
 +      case JavaInputEvent::Type::Key:
-+        dispatchJavaKeyEvent(event.keycode, event.action, event.meta_state);
++        dispatchJavaKeyEvent(
++            event.keycode, event.action, event.meta_state, event.unicode, event.repeat_count);
 +        break;
 +      case JavaInputEvent::Type::KeyboardDisconnected:
 +        resetPhysicalModifiers();
@@ -480,25 +935,36 @@ index ae9cf24..022c3ff 100644
    }
  }
  
-@@ -806,10 +948,15 @@ void GHOST_SystemAndroid::dispatchTextInput(const char *utf8_string)
+@@ -804,35 +1119,35 @@ void GHOST_SystemAndroid::dispatchTextInput(const char *utf8_string)
+   }
+ }
  
- void GHOST_SystemAndroid::dispatchJavaKeyEvent(int32_t keycode, int32_t action, int32_t meta_state)
+-void GHOST_SystemAndroid::dispatchJavaKeyEvent(int32_t keycode, int32_t action, int32_t meta_state)
++void GHOST_SystemAndroid::dispatchJavaKeyEvent(int32_t keycode,
++                                              int32_t action,
++                                              int32_t meta_state,
++                                              int32_t unicode,
++                                              int32_t repeat_count)
  {
 -  if (!window_) {
 +  if (!window_ || (action != AKEY_EVENT_ACTION_DOWN && action != AKEY_EVENT_ACTION_UP)) {
-+    return;
-+  }
+     return;
+   }
+-  meta_state_ = meta_state;
+-  const GHOST_TKey key = convertAndroidKey(keycode);
+-  if (key == GHOST_kKeyUnknown) {
 +  /* InputConnection metadata is not a hardware snapshot (even Caps Lock can be IME-only).
 +   * Accept explicit modifier edges without releasing other physically held groups. */
 +  if (is_android_modifier(keycode)) {
 +    updatePhysicalModifiers(keycode, action, meta_state | meta_state_);
      return;
    }
--  meta_state_ = meta_state;
-   const GHOST_TKey key = convertAndroidKey(keycode);
-   if (key == GHOST_kKeyUnknown) {
-     return;
-@@ -821,18 +968,14 @@ void GHOST_SystemAndroid::dispatchJavaKeyEvent(int32_t keycode, int32_t action,
+-  const bool down = action == AKEY_EVENT_ACTION_DOWN;
+-  pushEvent(std::make_unique<GHOST_EventKey>(
+-      getMilliSeconds(), down ? GHOST_kEventKeyDown : GHOST_kEventKeyUp, window_, key, false));
++  /* Virtual keyboard device -1 keeps its dead-key sequence separate from hardware. */
++  dispatchKeyEvent(keycode, action, meta_state | meta_state_, unicode, repeat_count, -1);
+ }
  
  GHOST_TSuccess GHOST_SystemAndroid::getModifierKeys(GHOST_ModifierKeys &keys) const
  {
@@ -525,21 +991,105 @@ index ae9cf24..022c3ff 100644
    return GHOST_kSuccess;
  }
  
+@@ -863,6 +1178,60 @@ static JNIEnv *android_jni_env(android_app *app)
+   return vm->AttachCurrentThread(&env, nullptr) == JNI_OK ? env : nullptr;
+ }
+ 
++/* Character lookup uses the device's Android layout, not a US keycode table. */
++static int32_t android_key_unicode(android_app *app,
++                                   int32_t device_id,
++                                   int32_t keycode,
++                                   int32_t meta_state)
++{
++  JNIEnv *env = android_jni_env(app);
++  if (!env || !app->activity->clazz) {
++    return 0;
++  }
++  jobject activity = app->activity->clazz;
++  jclass activity_class = env->GetObjectClass(activity);
++  if (!activity_class) {
++    env->ExceptionClear();
++    return 0;
++  }
++  jmethodID method = env->GetMethodID(activity_class, "getKeyUnicode", "(III)I");
++  int32_t unicode = 0;
++  if (method) {
++    unicode = env->CallIntMethod(activity, method, device_id, keycode, meta_state);
++  }
++  if (env->ExceptionCheck()) {
++    env->ExceptionClear();
++    unicode = 0;
++  }
++  env->DeleteLocalRef(activity_class);
++  return unicode;
++}
++
++static int32_t android_compose_key_accent(android_app *app, int32_t accent, int32_t unicode)
++{
++  JNIEnv *env = android_jni_env(app);
++  if (!env || !app->activity->clazz) {
++    return 0;
++  }
++  jobject activity = app->activity->clazz;
++  jclass activity_class = env->GetObjectClass(activity);
++  if (!activity_class) {
++    env->ExceptionClear();
++    return 0;
++  }
++  jmethodID method = env->GetMethodID(activity_class, "composeKeyAccent", "(II)I");
++  int32_t composed = 0;
++  if (method) {
++    composed = env->CallIntMethod(activity, method, accent, unicode);
++  }
++  if (env->ExceptionCheck()) {
++    env->ExceptionClear();
++    composed = 0;
++  }
++  env->DeleteLocalRef(activity_class);
++  return composed;
++}
++
+ /* Fetch the ClipboardManager for the activity, or null. */
+ static jobject android_clipboard_manager(JNIEnv *env, jobject activity)
+ {
 diff --git a/intern/ghost/intern/GHOST_SystemAndroid.hh b/intern/ghost/intern/GHOST_SystemAndroid.hh
-index c04d0dd..958018d 100644
+index c04d0dd..e8ddc78 100644
 --- a/intern/ghost/intern/GHOST_SystemAndroid.hh
 +++ b/intern/ghost/intern/GHOST_SystemAndroid.hh
-@@ -76,6 +76,7 @@ class GHOST_SystemAndroid : public GHOST_System {
+@@ -57,8 +57,7 @@ class GHOST_SystemAndroid : public GHOST_System {
+ 
+   uint16_t getDPIHint();
+ 
+-  /* Soft keyboard via NativeActivity (no JNI). Note: with NativeActivity the
+-   * typed text is not delivered back; hardware keys still work as key events. */
++  /* Soft keyboard and committed text use the activity's InputConnection bridge. */
+   GHOST_TSuccess popupOnScreenKeyboard(GHOST_IWindow *window) override;
+   GHOST_TSuccess hideOnScreenKeyboard(GHOST_IWindow *window) override;
+ 
+@@ -75,7 +74,12 @@ class GHOST_SystemAndroid : public GHOST_System {
+ 
    /* Soft-keyboard input forwarded from the Java InputConnection bridge. */
    void handleTextInput(const char *utf8_string);
-   void handleJavaKeyEvent(int32_t keycode, int32_t action, int32_t meta_state);
+-  void handleJavaKeyEvent(int32_t keycode, int32_t action, int32_t meta_state);
++  void handleJavaKeyEvent(int32_t keycode,
++                          int32_t action,
++                          int32_t meta_state,
++                          int32_t unicode,
++                          int32_t repeat_count);
 +  void handleKeyboardDisconnected();
  
   private:
    GHOST_TSuccess init() override;
-@@ -93,6 +94,9 @@ class GHOST_SystemAndroid : public GHOST_System {
+@@ -92,7 +96,16 @@ class GHOST_SystemAndroid : public GHOST_System {
+                               const GHOST_IWindow *parent_window = nullptr) override;
  
    int32_t handleKeyEvent(AInputEvent *event);
++  int32_t dispatchKeyEvent(int32_t keycode,
++                           int32_t action,
++                           int32_t meta_state,
++                           int32_t unicode,
++                           int32_t repeat_count,
++                           int32_t device_id);
    int32_t handleMotionEvent(AInputEvent *event);
 +  void updatePhysicalModifiers(int32_t keycode, int32_t action, int32_t meta_state);
 +  void syncModifierEvents();
@@ -547,17 +1097,20 @@ index c04d0dd..958018d 100644
  
    android_app *app_;
    GHOST_WindowAndroid *window_;
-@@ -101,6 +105,9 @@ class GHOST_SystemAndroid : public GHOST_System {
+@@ -101,6 +114,12 @@ class GHOST_SystemAndroid : public GHOST_System {
    /* Input state tracked from events for the out-of-queue queries. */
    GHOST_Buttons buttons_;
    int32_t meta_state_;
 +  /* Groups already delivered to Blender. Physical sides and touch ownership stay separate. */
 +  int32_t emitted_modifiers_ = 0;
++  /* Dead-key composition belongs to the keyboard device and ends on focus loss. */
++  int32_t pending_accent_ = 0;
++  int32_t pending_accent_device_ = 0;
 +  bool input_focused_ = true;
    int32_t cursor_x_, cursor_y_;
  
    /* S Pen side button, tracked so it works while hovering or touching. */
-@@ -122,10 +129,7 @@ class GHOST_SystemAndroid : public GHOST_System {
+@@ -122,10 +141,7 @@ class GHOST_SystemAndroid : public GHOST_System {
     * to a rotate), and one-finger drags stay available to Blender's buttons, sliders and editor
     * borders. */
    bool touch_pan_active_;
@@ -569,7 +1122,7 @@ index c04d0dd..958018d 100644
    bool touch_shift_active_;
  
    /* Finger touch: the button is decided after the press, so that holding still
-@@ -134,7 +138,7 @@ class GHOST_SystemAndroid : public GHOST_System {
+@@ -134,7 +150,7 @@ class GHOST_SystemAndroid : public GHOST_System {
    /* Parks the cursor once a stylus has really left, see hover_exit_pending_. */
    void hoverExitCheck();
    void touchSendButton(GHOST_TButton mask, GHOST_TEventType type);
@@ -578,7 +1131,7 @@ index c04d0dd..958018d 100644
    void touchSendShift(bool down);
    /* Release the three-finger pan, if one is running. */
    void touchEndPan();
-@@ -159,13 +163,17 @@ class GHOST_SystemAndroid : public GHOST_System {
+@@ -159,13 +175,22 @@ class GHOST_SystemAndroid : public GHOST_System {
    /* The Java IME callbacks run on the Android UI thread, while the event queue
     * is only safe to touch from Blender's thread, so they are queued and drained
     * in processEvents(). */
@@ -589,10 +1142,16 @@ index c04d0dd..958018d 100644
 +    Type type;
 +    std::string text;
 +    int32_t keycode = 0, action = 0, meta_state = 0;
++    int32_t unicode = 0, repeat_count = 0;
    };
    void drainJavaInput();
    void dispatchTextInput(const char *utf8_string);
-   void dispatchJavaKeyEvent(int32_t keycode, int32_t action, int32_t meta_state);
+-  void dispatchJavaKeyEvent(int32_t keycode, int32_t action, int32_t meta_state);
++  void dispatchJavaKeyEvent(int32_t keycode,
++                            int32_t action,
++                            int32_t meta_state,
++                            int32_t unicode,
++                            int32_t repeat_count);
    std::mutex java_input_mutex_;
 -  std::vector<std::string> java_text_;
 -  std::vector<JavaKeyEvent> java_keys_;

@@ -2,7 +2,42 @@
 
 Avaliação em 28/10/2026 da base `89479ec817bfe9411ae6ef6f35392d5450e1ad0b` (Android Alpha 3, Full).
 
-**O diagnóstico real do runner público confirmou 85,736 GiB livres, sem limpeza. Há folga de disco para tentar a compilação Full no runner gratuito.** Ainda não há medição do pico de RAM, disco ou tempo do build completo para garantir sua conclusão. Os 100 GiB da receita anterior são uma margem de planejamento configurável, não um requisito medido do Blender.
+## Atualização: compilação Full concluída na execução 4
+
+O [run 40695500313](https://github.com/cesargcode/blender-android-alpha3/actions/runs/40695500313)
+concluiu a compilação e o empacotamento Full no runner público `ubuntu-24.04`, com
+`JOBS=2`, e gerou um APK exibido no log como `272M`. A checagem seguinte falhou
+porque o leitor esperava `sdkVersion`, enquanto o `aapt2` 35.0.1 escreve
+`minSdkVersion`. O APK dessa execução não foi retido pelo workflow de então.
+Isso demonstra capacidade para compilar a versão usada naquele run, não aprovação
+do APK ou teste funcional no aparelho.
+
+| Medição da execução 4 | Valor e alcance |
+| --- | --- |
+| Etapa Ninja Full, após os testes de compilação antecipados | 1 h 09 min 14 s; não inclui downloads, configuração, host tools, compilação antecipada ou empacotamento |
+| Pasta de trabalho após empacotar | 20.014.944.256 bytes = 20,01 GB = 18,64 GiB |
+| Espaço livre no filesystem após empacotar | 69.259.825.152 bytes = 69,26 GB = 64,50 GiB |
+| RSS máximo registrado por `/usr/bin/time -v` no Ninja Full | 8.125.244 KiB ≈ 7,75 GiB; máximo por processo da árvore, **não pico agregado de todos os processos** |
+
+Os dados de disco são fotografias ao fim da etapa, não medidas do pico. O pico
+agregado de RAM continua sem medição. `JOBS=2` é a configuração comprovada para
+essa compilação; aumentar para quatro tarefas pode elevar a pressão de memória
+e não tem ganho de duração demonstrado. Não há motivo medido para contratar um
+runner pago. Sem cache persistente, a próxima VM recomeça downloads e compilação.
+
+A [receita atual](build/README.md) verifica SDK/manifest antes do build, compila
+Java e os cinco arquivos C++ alterados antecipadamente e aceita ambos os nomes
+do campo mínimo, exigindo minSdk 31 e targetSdk 34. O workflow atualizado preserva
+um APK existente após falha em draft Release como `UNVALIDATED`, com relatórios
+e checksums; isso não transforma a falha em sucesso.
+
+## Estudo anterior e diagnóstico inicial
+
+As seções seguintes preservam o inventário e a avaliação feitos **antes** da
+compilação completa. `capacidade-medida.json` continua sendo o registro histórico
+desse inventário e do diagnóstico inicial, sem incluir as medições da execução 4.
+
+**O diagnóstico inicial do runner público confirmou 85,736 GiB livres, sem limpeza.** Naquele momento, havia folga de disco para tentar a compilação Full, mas ainda não existiam medições do build. Os 100 GiB da receita são uma margem de planejamento configurável, não um requisito medido do Blender.
 
 ## Tamanho que foi medido
 
@@ -65,9 +100,9 @@ Os **14 GB** da documentação abaixo são a especificação publicada do runner
 
 Os recursos são os documentados pelo [GitHub para runners padrão](https://docs.github.com/en/actions/reference/runners/github-hosted-runners) e [larger runners](https://docs.github.com/en/actions/reference/runners/larger-runners). O runner maior é pago, requer uma organização GitHub Team ou Enterprise Cloud e configuração prévia; uma conta pessoal Pro, isoladamente, não o habilita. Não foi contratado ou iniciado runner pago.
 
-Todos os runners hospedados pelo GitHub têm limite de **6 horas por job**. Não existe medição deste build para afirmar que 4 ou 8 CPUs o concluirão nesse prazo. Jobs separados podem reduzir o risco de timeout por etapa, mas precisam transportar os resultados e dependências entre máquinas; isso não elimina os custos de armazenamento e transferência. [Limites de Actions](https://docs.github.com/en/actions/reference/limits).
+Todos os runners hospedados pelo GitHub têm limite de **6 horas por job**. Na avaliação inicial ainda não existia medição de duração deste build; a execução 4 posteriormente concluiu a compilação com duas tarefas Ninja no runner público de quatro CPUs. Isso não mede o efeito de aumentar o paralelismo. Jobs separados precisam transportar resultados e dependências entre máquinas. [Limites de Actions](https://docs.github.com/en/actions/reference/limits).
 
-O diagnóstico observado não justifica contratar um runner maior neste momento. A próxima etapa é medir o build no runner público gratuito, conservando os logs. Não houve limpeza de arquivos do computador local ou da VM nesta avaliação.
+O diagnóstico inicial justificou tentar o runner público gratuito e conservar os logs; a compilação da execução 4 confirmou essa escolha. Não houve limpeza de arquivos do computador local ou da VM nesta avaliação.
 
 ## Decisão prática para a primeira execução
 
