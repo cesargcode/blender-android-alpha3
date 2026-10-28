@@ -275,12 +275,11 @@ jobs:
         run: |
           set -euo pipefail
           review="$RUNNER_TEMP/blender-alpha3-build/release-review"
-          assets=("$review"/*)
+          if [[ "$APK_VALIDATION" == BUILD_CHECKS_PASSED ]]; then
+            priority=blender-alpha3-modificadores-full-arm64-unsigned.apk
+          else
+            priority=blender-alpha3-modificadores-full-arm64-UNVALIDATED.apk
+          fi
           tag="build-unsigned-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          release_url="$(gh release create "$tag" \
-            "${assets[@]}" \
-            --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
-            --title "Blender Alpha 3 Full ARM64 $APK_VALIDATION - $GITHUB_RUN_ID" \
-            --notes-file "$review/release-notes.md")"
-          printf '\n### Resultado para revisao\n\nDraft Release: %s\n\nEstado: **%s**. Sem assinatura local final e sem teste no aparelho.\n' \
-            "$release_url" "$APK_VALIDATION" >> "$GITHUB_STEP_SUMMARY"
+          bash build/upload-draft-release.sh "$review" "$priority" "$tag" \
+            "Blender Alpha 3 Full ARM64 $APK_VALIDATION - $GITHUB_RUN_ID"
