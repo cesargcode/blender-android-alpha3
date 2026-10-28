@@ -1,8 +1,16 @@
 # Receita Full ARM64 para Ubuntu 24.04
 
 A receita compila sobre a base `89479ec817bfe9411ae6ef6f35392d5450e1ad0b`, aplica o
-patch deste repositório e preserva os recursos Full. Ainda não foi executada de
-ponta a ponta. O padrão `SIGN_APK=0` produz um APK unsigned, sem carregar ou gerar
+patch deste repositório e preserva os recursos Full. Na
+[execução 4](https://github.com/cesargcode/blender-android-alpha3/actions/runs/40695500313),
+a compilação Full e o empacotamento terminaram, gerando um APK que o log exibiu
+como `272M`. A validação seguinte falhou porque esperava o campo `sdkVersion`,
+enquanto o `aapt2` 35.0.1 usa `minSdkVersion`. O workflow daquela execução não
+reteve o APK após a falha. Isso comprova a compilação da versão do patch usada
+naquela execução, sem comprovar funcionamento no aparelho ou validar mudanças
+posteriores.
+
+O padrão `SIGN_APK=0` produz um APK unsigned, sem carregar ou gerar
 chaves de assinatura. Esse arquivo não pode ser instalado antes da assinatura.
 
 Use Linux x86_64 e uma pasta de trabalho exclusiva, sem espaços. Pré-requisitos:
@@ -40,21 +48,37 @@ SIGN_APK=0 JOBS=2 MIN_FREE_GIB=40 \
 é o piso escolhido para esta tentativa, e o padrão conservador do script ainda
 é 100 GiB. Nenhum deles é o consumo medido. O subtotal lógico conhecido é 8,686 GiB, sem os objetos
 de compilação, staging e partes do SDK. Consulte [CAPACIDADE.md](../CAPACIDADE.md)
-e a medição do runner para escolher uma margem. O pico real de disco/RAM e a
-duração permanecem desconhecidos. O padrão usa duas tarefas; `JOBS=4` pode aumentar
-a pressão de memória. Não há promessa de conclusão no limite de seis horas do
-GitHub Actions.
+e os resultados abaixo para escolher uma margem.
+
+Na execução 4, com `JOBS=2`, a etapa Ninja Full levou **1 h 09 min 14 s**, além
+do tempo de download, configuração, geradores host, compilação antecipada e
+empacotamento. Após empacotar, a pasta de trabalho ocupava **20.014.944.256 bytes**
+(20,01 GB; 18,64 GiB), e o disco ainda tinha **69.259.825.152 bytes livres**
+(69,26 GB; 64,50 GiB). São medições naquele instante, não picos de uso.
+O `/usr/bin/time -v` registrou RSS máximo de **8.125.244 KiB**, aproximadamente
+**7,75 GiB**, para um processo da árvore de execução; esse valor **não mede o pico
+agregado** de RAM de todos os compiladores e demais processos simultâneos.
+
+Mantenha `JOBS=2` como ponto de partida: essa configuração concluiu a compilação
+no runner de cerca de 16 GB de RAM. `JOBS=4` pode reduzir parte do tempo, mas
+aumenta a concorrência por memória e ainda não foi medido neste build; não há
+evidência para prometer que será mais rápido ou evitará falta de memória.
+O limite do job no GitHub Actions continua sendo seis horas.
 
 O [diagnóstico do runner público](https://github.com/cesargcode/blender-android-alpha3/actions/runs/40677345178)
 mediu 4 CPUs, 16.766.414.848 bytes de RAM e 92.057.993.216 bytes livres no workspace
 (85,74 GiB). Essa execução permite tentar o build sem limpar ferramentas
 pré-instaladas. Outra execução receberá uma VM nova e deve conferir o espaço
-novamente. O NDK r30 beta1 exato ainda precisa ser instalado.
+novamente.
+O workflow instala o NDK r30 beta1 exato em cada runner que ainda não o tenha,
+após aceite explícito da licença Preview; essa instalação já funcionou na
+execução 4. A receita local exige que o SDK/NDK indicado acima já esteja disponível.
 
 A receita registra espaço e memória nas etapas principais e usa `/usr/bin/time`
 quando disponível. Mantém arquivos locais para retomada. Não configura cache
-remoto ou publica artefatos. Uma nova execução do runner hospedado começa sem os
-builds anteriores. O empacotador upstream recria somente seu staging de APK.
+remoto nem envia arquivos por conta própria. Sem cache persistente, uma nova
+execução do runner hospedado recomeça downloads e compilação; os builds anteriores
+não são recuperados. O empacotador upstream recria somente seu staging de APK.
 
 Git LFS: só o repositório da fonte usa `lfs.fetchexclude=tests/**`. Download,
 `fsck` e verificação de ponteiros não materializados aplicam a mesma exclusão.
@@ -65,7 +89,20 @@ normal em `tests/`, assets, scripts e recursos de runtime não são excluídos.
 preserva sua montagem de bibliotecas, recursos e Java e gera um script temporário
 fora do checkout. Substitui somente a localização do script temporário e o trecho
 final de assinatura por alinhamento. Não modifica o patch ou a fonte empacotada.
-Depois, a receita confere alinhamento, badging, ABI ARM64 e minSdk 31.
+Antes dos builds demorados, a receita atual faz um pacote mínimo com o manifest
+e os recursos reais para conferir os metadados SDK, e compila a Activity com o
+mesmo SDK/JDK do empacotador. Após configurar o alvo Android, compila primeiro os
+cinco arquivos `.cc` alterados pelo patch, incluindo suas dependências necessárias,
+antes de continuar o restante do Ninja Full. O hook dos geradores host mantém
+somente esse build nativo sem interface gráfica, preservando os recursos Full
+do alvo Android.
+
+Na conferência antecipada e no APK final, a receita aceita os nomes de campo
+`minSdkVersion` e `sdkVersion`, mantendo o valor mínimo obrigatório **31** e
+`targetSdkVersion` obrigatório **34**. A correção do leitor foi reproduzida com
+pacotes mínimos reais do `aapt2`, incluindo rejeição de minSdk 30 e targetSdk 33.
+A verificação final também confere alinhamento, assinatura conforme o modo e
+ABI ARM64. Isso não substitui teste funcional em Android.
 
 Saídas esperadas após sucesso:
 
@@ -77,6 +114,18 @@ blender-alpha3-build/output/apk-badging.txt
 blender-alpha3-build/output/apk-signature.txt
 blender-alpha3-build/logs/build-full.log
 ```
+
+O workflow atual acrescenta uma etapa de recuperação separada da receita. Se a
+compilação ou uma checagem falhar após existir um APK, ele recupera o arquivo de
+`output/` ou do staging do empacotador e o guarda em um **draft Release** como
+**UNVALIDATED**. Mantém o job com falha e anexa os relatórios disponíveis, resultados
+das ferramentas, proveniência, patch, licença, trecho final do log e checksums.
+Se a receita terminar com sucesso e produzir a saída esperada, o estado é
+`BUILD_CHECKS_PASSED`, ainda sem assinatura local e teste no aparelho. Sem APK, ou
+em execução cancelada, não há esse envio. Não são usados Actions artifacts ou
+cache persistente; o draft é material de revisão, não um instalador publicado.
+O bloco de recuperação foi exercitado localmente com sucesso, falha com APK e
+falha sem APK; a condição de cancelamento foi conferida estaticamente.
 
 Assine o unsigned localmente, com uma chave estável privada. Por exemplo, usando
 as Android Build Tools 35.0.1; `apksigner` solicitará a senha sem colocá-la no comando:

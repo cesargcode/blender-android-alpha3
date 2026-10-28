@@ -106,6 +106,16 @@ timed_build() {
     "$@"
   fi
 }
+validate_apk_sdk() {
+  local apk="$1" badging_file="$2"
+  "$BT/aapt2" dump badging "$apk" > "$badging_file"
+  cat "$badging_file"
+  # Build-tools 35.0.1 reports minSdkVersion; older tools used sdkVersion.
+  grep -Eq "^(minSdkVersion|sdkVersion):'31'[[:space:]]*$" "$badging_file" \
+    || die 'minSdk inesperado no APK.'
+  grep -Eq "^targetSdkVersion:'34'[[:space:]]*$" "$badging_file" \
+    || die 'targetSdk inesperado no APK.'
+}
 record_resources before-downloads
 if [[ ! -d "$SRC/.git" ]]; then
   [[ ! -e "$SRC" ]] || die "A pasta $SRC já existe sem um repositório gerenciado por esta receita."
@@ -189,6 +199,17 @@ git -C "$VH" diff --cached --quiet || die 'Os headers Vulkan têm alterações s
 cd "$SRC"
 # shellcheck source=/dev/null
 source build_files/android/env.sh
+printf '\n[preflight] Linking the real manifest/resources and checking SDK metadata.\n'
+mkdir -p "$TASK_DIR/manifest-check"
+"$BT/aapt2" compile --dir "$SRC/build_files/android/apk/app/src/main/res" \
+  -o "$TASK_DIR/manifest-check/res.zip"
+"$BT/aapt2" link -o "$TASK_DIR/manifest-check/manifest-check.apk" \
+  -I "$ANDROID_HOME/platforms/android-35/android.jar" \
+  --manifest "$SRC/build_files/android/apk/app/src/main/AndroidManifest.xml" \
+  "$TASK_DIR/manifest-check/res.zip" \
+  --min-sdk-version "$ANDROID_API" --target-sdk-version "$ANDROID_TARGET_API"
+validate_apk_sdk "$TASK_DIR/manifest-check/manifest-check.apk" \
+  "$TASK_DIR/logs/manifest-preflight-badging.txt"
 printf '\n[preflight] Compiling the patched Android activity with the packaging SDK/JDK.\n'
 mkdir -p "$TASK_DIR/java-compile-check"
 "$JAVA_HOME/bin/javac" -classpath "$ANDROID_HOME/platforms/android-35/android.jar" \
@@ -284,9 +305,8 @@ else
   APK_BASENAME=blender-alpha3-modificadores-full-arm64-unsigned.apk
 fi
 "$BT/zipalign" -c -p 4 "$APK"
-"$BT/aapt2" dump badging "$APK" > "$TASK_DIR/output/apk-badging.txt"
+validate_apk_sdk "$APK" "$TASK_DIR/output/apk-badging.txt"
 grep -Fq "native-code: 'arm64-v8a'" "$TASK_DIR/output/apk-badging.txt" || die 'ABI inesperada no APK.'
-grep -Fq "sdkVersion:'31'" "$TASK_DIR/output/apk-badging.txt" || die 'minSdk inesperado no APK.'
 DEST="$TASK_DIR/output/$APK_BASENAME"
 cp -- "$APK" "$DEST"
 (
