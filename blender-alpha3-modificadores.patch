@@ -616,7 +616,7 @@ index 47c441a..37c7faa 100644
        wm_event_state_update_and_click_set(&event,
                                            event_time_ms,
 diff --git a/source/blender/windowmanager/intern/wm_virtual_keyboard.cc b/source/blender/windowmanager/intern/wm_virtual_keyboard.cc
-index d96668e..85af258 100644
+index d96668e..4fb9e7f 100644
 --- a/source/blender/windowmanager/intern/wm_virtual_keyboard.cc
 +++ b/source/blender/windowmanager/intern/wm_virtual_keyboard.cc
 @@ -321,6 +321,8 @@ static const float VK_MIN_HEIGHT = 150.0f;
@@ -641,7 +641,7 @@ index d96668e..85af258 100644
  /* Android hands out exactly one window, and a second keyboard would have nothing to attach to. */
  static VirtualKeyboard g_vk;
  
-+static uint8_t vk_modifier_flag(int slot)
++static wmEventModifierFlag vk_modifier_flag(int slot)
 +{
 +  switch (slot) {
 +    case VK_MOD_CTRL:
@@ -651,16 +651,16 @@ index d96668e..85af258 100644
 +    case VK_MOD_ALT:
 +      return KM_ALT;
 +    default:
-+      return 0;
++      return wmEventModifierFlag(0);
 +  }
 +}
 +
-+uint8_t wm_virtual_keyboard_modifiers_get(const wmWindow *win)
++wmEventModifierFlag wm_virtual_keyboard_modifiers_get(const wmWindow *win)
 +{
 +  if (!g_vk.open || g_vk.win != win) {
-+    return 0;
++    return wmEventModifierFlag(0);
 +  }
-+  uint8_t modifiers = 0;
++  wmEventModifierFlag modifiers = wmEventModifierFlag(0);
 +  for (int slot = 0; slot < VK_MOD_NUM; slot++) {
 +    if (g_vk.mods & (1 << slot)) {
 +      modifiers |= vk_modifier_flag(slot);
@@ -897,7 +897,7 @@ index 3362db2..1b208f1 100644
    const uint8_t keymodifier = keymodifier_sided[0] | keymodifier_sided[1];
    const uint8_t keymodifier_eventstate = win->runtime->eventstate->modifier;
 diff --git a/source/blender/windowmanager/wm.hh b/source/blender/windowmanager/wm.hh
-index c683eb1..ff0e7e6 100644
+index c683eb1..0c6941f 100644
 --- a/source/blender/windowmanager/wm.hh
 +++ b/source/blender/windowmanager/wm.hh
 @@ -8,6 +8,7 @@
@@ -908,12 +908,20 @@ index c683eb1..ff0e7e6 100644
  #include <optional>
  
  #include "BLI_compiler_attrs.hh"
-@@ -142,6 +143,10 @@ bool wm_virtual_keyboard_ghost_event(wmWindowManager *wm,
+@@ -26,6 +27,7 @@ struct wmTimer;
+ struct wmWindow;
+ struct wmWindowManager;
+ struct Main;
++enum wmEventModifierFlag : uint8_t;
+ 
+ /**
+  * Cause a delayed #WM_exit()
+@@ -142,6 +144,10 @@ bool wm_virtual_keyboard_ghost_event(wmWindowManager *wm,
                                       const void *customdata);
  /** Drop the keyboard when the window it is drawn into goes away. */
  void wm_virtual_keyboard_window_close(wmWindow *win);
 +/** Latched virtual #KM_CTRL, #KM_SHIFT and #KM_ALT flags for this window, or zero when closed. */
-+uint8_t wm_virtual_keyboard_modifiers_get(const wmWindow *win);
++wmEventModifierFlag wm_virtual_keyboard_modifiers_get(const wmWindow *win);
 +/** Reconcile external ownership at the same boundary as WM's platform modifier query. */
 +void wm_virtual_keyboard_external_modifiers_set(const wmWindow *win, uint8_t modifiers);
  
