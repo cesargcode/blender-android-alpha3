@@ -1,0 +1,121 @@
+{
+  "assessed_date": "2026-10-28",
+  "method": "Git trees at exact commits, standard Git LFS v1 pointer sizes, ZIP central-directory uncompressed sizes; no library payload downloaded",
+  "libraries": [
+    {
+      "repo": "lib-android_arm64",
+      "commit": "59001bef2a4983d0f42e3281cf622a5734c1cb02",
+      "entries": 13024,
+      "blobs": 11795,
+      "lfs_files": 531,
+      "unique_lfs_objects": 525,
+      "lfs_checkout_bytes": 1027401985,
+      "lfs_cache_bytes": 1027217721,
+      "ordinary_checkout_bytes": 162757451,
+      "total_checkout_bytes": 1190159436,
+      "checkout_plus_lfs_cache_bytes": 2217377157
+    },
+    {
+      "repo": "lib-linux_x64",
+      "commit": "ecbd06cf6d2a4aa6b00a61ffb479fc81b17aba08",
+      "entries": 15881,
+      "blobs": 14304,
+      "lfs_files": 785,
+      "unique_lfs_objects": 774,
+      "lfs_checkout_bytes": 2171686410,
+      "lfs_cache_bytes": 2087273694,
+      "ordinary_checkout_bytes": 234390468,
+      "total_checkout_bytes": 2406076878,
+      "checkout_plus_lfs_cache_bytes": 4493350572
+    }
+  ],
+  "source": {
+    "commit": "89479ec817bfe9411ae6ef6f35392d5450e1ad0b",
+    "file_count": 20544,
+    "modes": {
+      "all": {
+        "lfs_files": 6781,
+        "unique_lfs_objects": 6591,
+        "lfs_checkout_bytes": 830285032,
+        "lfs_cache_bytes": 822539935,
+        "ordinary_checkout_bytes": 302414080,
+        "total_checkout_bytes": 1132699112,
+        "checkout_plus_lfs_cache_bytes": 1955239047
+      },
+      "without_tests": {
+        "lfs_files": 365,
+        "unique_lfs_objects": 324,
+        "lfs_checkout_bytes": 26628403,
+        "lfs_cache_bytes": 26547239,
+        "ordinary_checkout_bytes": 303248175,
+        "total_checkout_bytes": 329876578,
+        "checkout_plus_lfs_cache_bytes": 356423817
+      }
+    },
+    "lfs_by_top_directory": {
+      "assets": {
+        "files": 15,
+        "bytes": 11800424
+      },
+      "doc": {
+        "files": 1,
+        "bytes": 5703
+      },
+      "release": {
+        "files": 344,
+        "bytes": 14335760
+      },
+      "scripts": {
+        "files": 5,
+        "bytes": 486516
+      },
+      "tests": {
+        "files": 6416,
+        "bytes": 803656629
+      }
+    }
+  },
+  "ndk": {
+    "url": "https://dl.google.com/android/repository/android-ndk-r30-beta1-linux.zip",
+    "entries": 9960,
+    "uncompressed_bytes": 2259809837,
+    "compressed_payload_bytes": 710148060,
+    "metadata_bytes_downloaded": 1826343,
+    "archive_bytes": 713550176,
+    "directory_range": "bytes 711789347-713550153/713550176"
+  },
+  "known_base_bytes": 9326961383,
+  "excluded_from_total": [
+    "ordinary compressed Git objects",
+    "filesystem block overhead",
+    "SDK tools/platform/build-tools",
+    "Vulkan headers",
+    "compiler/build outputs",
+    "APK staging and temporary archives",
+    "operating system packages"
+  ],
+  "source_test_exclusion_savings_bytes": 1598815230,
+  "observed_github_runner": {
+    "run_id": 40677345178,
+    "run_url": "https://github.com/cesargcode/blender-android-alpha3/actions/runs/40677345178",
+    "observed_time_utc": "2026-10-28T11:06:29Z",
+    "diagnostic_status": "success",
+    "runner_label": "ubuntu-24.04",
+    "repository_visibility": "public",
+    "cleanup_performed": false,
+    "cpu_count": 4,
+    "cpu_model": "AMD EPYC 7763",
+    "memory_total_bytes": 16766414848,
+    "memory_available_bytes": 15842127872,
+    "swap_total_bytes": 3221221376,
+    "disk_total_bytes": 154894188544,
+    "disk_used_bytes": 62819418112,
+    "disk_available_bytes": 92057993216,
+    "projected_remaining_after_known_base_bytes": 82731031833,
+    "build_completed": false,
+    "peak_build_ram_measured": false,
+    "peak_build_disk_measured": false,
+    "full_build_duration_measured": false,
+    "interpretation": "Observed disk headroom supports a first Full build attempt on the free public runner. The published 14 GB specification differs from the available space measured in this VM; check each new job."
+  }
+}
