@@ -2,8 +2,20 @@
 
 Os testes extraem funções reais de um checkout Blender com o patch aplicado e
 as compilam com interfaces Android/GHOST/UI simuladas. A validação local usa
-Zig 0.13.0 e JDK 17 no Windows. Isso não equivale a compilar o aplicativo ou
-testá-lo em Android; o novo caminho de texto ainda não passou pelo build Android.
+Zig 0.13.0 e JDK 17 no Windows. As **752 verificações locais passaram**; esses
+ensaios com interfaces simuladas não executam o aplicativo no Android.
+
+A [execução 6](https://github.com/cesargcode/blender-android-alpha3/actions/runs/40731216675)
+concluiu a compilação Full, Java/DEX/APK e as verificações do pacote, com envio dos
+16 arquivos confirmado. Após a inclusão local das duas dependências glTF da
+revisão fixada, o pacote completo e o APK final assinado passaram em 610 verificações
+estáticas, examinando 267 arquivos ELF, sem falhas, avisos ou itens para revisão.
+Assinatura v3 e alinhamento com `zipalign -P 16` também passaram.
+
+O instalador `blender-alpha3-modificadores-full-arm64-signed.apk` é entregue
+localmente; o draft do GitHub contém o unsigned original. Seu hash e a distinção
+entre os artefatos estão no [guia de compilação](../build/README.md).
+**Instalação e funcionamento no aparelho continuam sem teste.**
 
 | Conjunto | Verificações locais aprovadas |
 | --- | ---: |
