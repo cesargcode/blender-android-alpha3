@@ -1,0 +1,30 @@
+{
+  "source": "blender-alpha3-source/intern/ghost/intern/GHOST_SystemAndroid.cc",
+  "declarations": "android_input_class.hh",
+  "assertions": "android_input_assertions.cc",
+  "production_declarations": [
+    "struct AndroidModifier",
+    "static constexpr AndroidModifier android_modifiers[]"
+  ],
+  "functions": [
+    "is_android_modifier",
+    "GHOST_SystemAndroid::updatePhysicalModifiers",
+    "GHOST_SystemAndroid::syncModifierEvents",
+    "GHOST_SystemAndroid::resetPhysicalModifiers",
+    "GHOST_SystemAndroid::touchSendShift",
+    "GHOST_SystemAndroid::touchSendButton",
+    "GHOST_SystemAndroid::touchEndPan",
+    "GHOST_SystemAndroid::touchCancelPending",
+    "GHOST_SystemAndroid::handleWindowFocus",
+    "convertAndroidKey",
+    "GHOST_SystemAndroid::handleKeyEvent",
+    "GHOST_SystemAndroid::getModifierKeys",
+    "utf8_char_len",
+    "GHOST_SystemAndroid::handleTextInput",
+    "GHOST_SystemAndroid::handleJavaKeyEvent",
+    "GHOST_SystemAndroid::handleKeyboardDisconnected",
+    "GHOST_SystemAndroid::dispatchTextInput",
+    "GHOST_SystemAndroid::dispatchJavaKeyEvent",
+    "GHOST_SystemAndroid::drainJavaInput"
+  ]
+}
