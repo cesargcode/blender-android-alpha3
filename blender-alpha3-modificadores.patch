@@ -1,5 +1,5 @@
 diff --git a/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java b/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java
-index e87d977..b38c8d1 100644
+index e87d977..7c4e0d5 100644
 --- a/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java
 +++ b/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java
 @@ -6,6 +6,9 @@ package org.blender.blender;
@@ -28,7 +28,7 @@ index e87d977..b38c8d1 100644
  import java.util.zip.ZipEntry;
  import java.util.zip.ZipInputStream;
  
-@@ -56,9 +61,111 @@ public class BlenderActivity extends NativeActivity {
+@@ -56,9 +61,122 @@ public class BlenderActivity extends NativeActivity {
    private static final String TAG = "Blender";
  
    private InputView inputView;
@@ -53,7 +53,9 @@ index e87d977..b38c8d1 100644
 +    public void onInputDeviceAdded(int deviceId) {
 +      rememberKeyboard(deviceId);
 +    }
-+
+ 
+-  private native void nativeOnCommitText(String text);
+-  private native void nativeOnKey(int keycode, int action, int metaState);
 +    @Override
 +    public void onInputDeviceChanged(int deviceId) {
 +      boolean wasKeyboard = physicalKeyboards.get(deviceId);
@@ -97,12 +99,21 @@ index e87d977..b38c8d1 100644
 +      return 0;
 +    }
 +  }
- 
--  private native void nativeOnCommitText(String text);
--  private native void nativeOnKey(int keycode, int action, int metaState);
++
 +  /* Also called from GHOST. Pending accents belong to its ordered event stream. */
 +  public int composeKeyAccent(int accent, int codePoint) {
 +    return KeyCharacterMap.getDeadChar(accent, codePoint);
++  }
++
++  /* CTL-4100 uses a different USB vendor ID in Android mode. Query the current
++   * device each time because Android device IDs can be reused after removal. */
++  public boolean isWacomIntuosS(int deviceId) {
++    InputDevice device = InputDevice.getDevice(deviceId);
++    if (device == null || device.isVirtual() || device.getProductId() != 0x0374) {
++      return false;
++    }
++    final int vendorId = device.getVendorId();
++    return vendorId == 0x056a || vendorId == 0x2d1f;
 +  }
 +
 +  private void commitInputText(CharSequence text) {
@@ -142,7 +153,7 @@ index e87d977..b38c8d1 100644
    private native void nativeSetLogPath(String path);
  
    private String logPath = null;
-@@ -82,6 +189,13 @@ public class BlenderActivity extends NativeActivity {
+@@ -82,6 +200,13 @@ public class BlenderActivity extends NativeActivity {
  
      inputView = new InputView(this);
      addContentView(inputView, new ViewGroup.LayoutParams(1, 1));
@@ -156,7 +167,7 @@ index e87d977..b38c8d1 100644
    }
  
    /* Scoped storage confines the app to its sandbox, but Blender opens and saves
-@@ -379,21 +493,27 @@ public class BlenderActivity extends NativeActivity {
+@@ -379,21 +504,27 @@ public class BlenderActivity extends NativeActivity {
        return new BaseInputConnection(this, false) {
          @Override
          public boolean commitText(CharSequence text, int newCursorPosition) {
@@ -190,7 +201,7 @@ index e87d977..b38c8d1 100644
            return true;
          }
 diff --git a/build_files/android/java/org/blender/blender/BlenderActivity.java b/build_files/android/java/org/blender/blender/BlenderActivity.java
-index a82c3ee..db6069e 100644
+index a82c3ee..7c6d867 100644
 --- a/build_files/android/java/org/blender/blender/BlenderActivity.java
 +++ b/build_files/android/java/org/blender/blender/BlenderActivity.java
 @@ -6,9 +6,13 @@ package org.blender.blender;
@@ -216,14 +227,16 @@ index a82c3ee..db6069e 100644
  /**
   * NativeActivity subclass that bridges soft-keyboard (IME) text into GHOST.
   * NativeActivity's surface has no InputConnection, so a tiny focusable proxy
-@@ -25,9 +31,111 @@ import android.view.inputmethod.InputMethodManager;
+@@ -25,9 +31,122 @@ import android.view.inputmethod.InputMethodManager;
  public class BlenderActivity extends NativeActivity {
  
    private InputView inputView;
 +  private InputManager inputManager;
 +  private final SparseBooleanArray physicalKeyboards = new SparseBooleanArray();
 +  private native void nativeOnKeyboardDisconnected();
-+
+ 
+-  private native void nativeOnCommitText(String text);
+-  private native void nativeOnKey(int keycode, int action, int metaState);
 +  private void rememberKeyboard(int deviceId) {
 +    InputDevice device = InputDevice.getDevice(deviceId);
 +    if (device != null && !device.isVirtual()
@@ -272,9 +285,7 @@ index a82c3ee..db6069e 100644
 +  private native void nativeOnCommitText(byte[] utf8);
 +  private native void nativeOnKey(
 +      int keycode, int action, int metaState, int unicode, int repeatCount);
- 
--  private native void nativeOnCommitText(String text);
--  private native void nativeOnKey(int keycode, int action, int metaState);
++
 +  /* NativeActivity consumes physical keys in its native input queue, before
 +   * Activity.dispatchKeyEvent. GHOST asks the device's Android key map for the
 +   * text to attach to that same key event; forwarding another Java event would
@@ -291,6 +302,17 @@ index a82c3ee..db6069e 100644
 +  /* Also called from GHOST. Pending accents belong to its ordered event stream. */
 +  public int composeKeyAccent(int accent, int codePoint) {
 +    return KeyCharacterMap.getDeadChar(accent, codePoint);
++  }
++
++  /* CTL-4100 uses a different USB vendor ID in Android mode. Query the current
++   * device each time because Android device IDs can be reused after removal. */
++  public boolean isWacomIntuosS(int deviceId) {
++    InputDevice device = InputDevice.getDevice(deviceId);
++    if (device == null || device.isVirtual() || device.getProductId() != 0x0374) {
++      return false;
++    }
++    final int vendorId = device.getVendorId();
++    return vendorId == 0x056a || vendorId == 0x2d1f;
 +  }
 +
 +  private void commitInputText(CharSequence text) {
@@ -330,7 +352,7 @@ index a82c3ee..db6069e 100644
  
    @Override
    protected void onCreate(Bundle state) {
-@@ -36,6 +144,13 @@ public class BlenderActivity extends NativeActivity {
+@@ -36,6 +155,13 @@ public class BlenderActivity extends NativeActivity {
  
      inputView = new InputView(this);
      addContentView(inputView, new ViewGroup.LayoutParams(1, 1));
@@ -344,7 +366,7 @@ index a82c3ee..db6069e 100644
    }
  
    /* Called from native (popupOnScreenKeyboard). */
-@@ -77,21 +192,27 @@ public class BlenderActivity extends NativeActivity {
+@@ -77,21 +203,27 @@ public class BlenderActivity extends NativeActivity {
        return new BaseInputConnection(this, false) {
          @Override
          public boolean commitText(CharSequence text, int newCursorPosition) {
@@ -439,10 +461,10 @@ index f927b79..2c58111 100644
  }
  
 diff --git a/intern/ghost/intern/GHOST_SystemAndroid.cc b/intern/ghost/intern/GHOST_SystemAndroid.cc
-index ae9cf24..ec49ffc 100644
+index ae9cf24..99f0298 100644
 --- a/intern/ghost/intern/GHOST_SystemAndroid.cc
 +++ b/intern/ghost/intern/GHOST_SystemAndroid.cc
-@@ -36,6 +36,12 @@
+@@ -36,6 +36,13 @@
  
  static android_app *g_android_app = nullptr;
  
@@ -451,11 +473,12 @@ index ae9cf24..ec49ffc 100644
 +                                   int32_t keycode,
 +                                   int32_t meta_state);
 +static int32_t android_compose_key_accent(android_app *app, int32_t accent, int32_t unicode);
++static bool android_is_wacom_intuos_s(android_app *app, int32_t device_id);
 +
  /* Hold a finger this long without moving to get a right-click. */
  static constexpr uint64_t TOUCH_LONG_PRESS_MS = 500;
  /* Movement past this (in pixels) makes the press a left-button drag. Sized for a
-@@ -51,6 +57,95 @@ static constexpr int32_t TOUCH_LONG_PRESS_MOVE_PX = 16;
+@@ -51,6 +58,95 @@ static constexpr int32_t TOUCH_LONG_PRESS_MOVE_PX = 16;
   * on them is what made every attempt to scroll a panel zoom it instead. */
  static constexpr float GESTURE_DECIDE_PX = 24.0f;
  
@@ -551,7 +574,7 @@ index ae9cf24..ec49ffc 100644
  GHOST_SystemAndroid::GHOST_SystemAndroid()
      : app_(g_android_app),
        window_(nullptr),
-@@ -228,9 +323,36 @@ void GHOST_SystemAndroid::handleNativeWindowInit(android_app *app)
+@@ -228,9 +324,37 @@ void GHOST_SystemAndroid::handleNativeWindowInit(android_app *app)
  
  void GHOST_SystemAndroid::handleWindowFocus(bool gained)
  {
@@ -582,13 +605,14 @@ index ae9cf24..ec49ffc 100644
 +      }
 +    }
 +    stylus_button_down_ = false;
++    stylus_middle_button_down_ = false;
 +    gesture_active_ = false;
 +    hover_exit_pending_ = false;
 +  }
    /* Without this the window manager never learns the window is active, and it then treats every
     * button event as arriving at a window that is being entered: it takes the cursor position from
     * GHOST at that moment and writes it over the position the event carries.
-@@ -296,9 +418,11 @@ static GHOST_TabletData tablet_from_event(AInputEvent *event)
+@@ -296,9 +420,11 @@ static GHOST_TabletData tablet_from_event(AInputEvent *event)
  
  int32_t GHOST_SystemAndroid::handleInputEvent(AInputEvent *event)
  {
@@ -601,7 +625,36 @@ index ae9cf24..ec49ffc 100644
    switch (AInputEvent_getType(event)) {
      case AINPUT_EVENT_TYPE_KEY:
        return handleKeyEvent(event);
-@@ -324,7 +448,7 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
+@@ -314,8 +440,26 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
+   const int32_t action = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
+   const size_t count = AMotionEvent_getPointerCount(event);
+ 
+-  const int32_t tool_type = count > 0 ? AMotionEvent_getToolType(event, 0) :
+-                                        AMOTION_EVENT_TOOL_TYPE_UNKNOWN;
++  if (count == 0) {
++    return 0;
++  }
++
++  const int32_t tool_type = AMotionEvent_getToolType(event, 0);
++  const bool is_pen = tool_type == AMOTION_EVENT_TOOL_TYPE_STYLUS ||
++                      tool_type == AMOTION_EVENT_TOOL_TYPE_ERASER;
++  /* CANCEL can carry the last pressed snapshot; it must still release buttons. */
++  const int32_t button_state = action == AMOTION_EVENT_ACTION_CANCEL ?
++                                   0 : AMotionEvent_getButtonState(event);
++  const int32_t pen_side_masks = AMOTION_EVENT_BUTTON_STYLUS_PRIMARY |
++                                 AMOTION_EVENT_BUTTON_STYLUS_SECONDARY |
++                                 AMOTION_EVENT_BUTTON_SECONDARY |
++                                 AMOTION_EVENT_BUTTON_TERTIARY;
++  /* The CTL-4100 also has an Android USB identity and can be exposed as a mouse.
++   * Query only while a side button is held. Identity is read afresh so a reused
++   * Android device ID cannot apply this mapping to a different pen or mouse. */
++  const bool is_wacom = (is_pen || tool_type == AMOTION_EVENT_TOOL_TYPE_MOUSE) &&
++                        (button_state & pen_side_masks) != 0 &&
++                        android_is_wacom_intuos_s(app_, AInputEvent_getDeviceId(event));
+ 
+   /* A physical/Bluetooth mouse must not go through the delayed finger-touch path: Blender relies
+    * on the middle button for viewport orbit and on the right button for context menus. */
+@@ -324,11 +468,10 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
      const int32_t y = int32_t(ghost_android_scale_input(AMotionEvent_getY(event, 0)));
      cursor_x_ = x;
      cursor_y_ = y;
@@ -610,7 +663,26 @@ index ae9cf24..ec49ffc 100644
      pushEvent(std::make_unique<GHOST_EventCursor>(
          getMilliSeconds(), GHOST_kEventCursorMove, window_, x, y, GHOST_TABLET_DATA_NONE));
  
-@@ -485,7 +609,6 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
+-    const int32_t button_state = AMotionEvent_getButtonState(event);
+     const auto sync_button = [&](const GHOST_TButton mask, const int32_t android_mask) {
+       const bool down = (button_state & android_mask) != 0;
+       if (buttons_.get(mask) != down) {
+@@ -342,8 +485,12 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
+       }
+     };
+     sync_button(GHOST_kButtonMaskLeft, AMOTION_EVENT_BUTTON_PRIMARY);
+-    sync_button(GHOST_kButtonMaskRight, AMOTION_EVENT_BUTTON_SECONDARY);
+-    sync_button(GHOST_kButtonMaskMiddle, AMOTION_EVENT_BUTTON_TERTIARY);
++    sync_button(GHOST_kButtonMaskRight,
++                is_wacom ? AMOTION_EVENT_BUTTON_STYLUS_SECONDARY | AMOTION_EVENT_BUTTON_TERTIARY :
++                           AMOTION_EVENT_BUTTON_SECONDARY);
++    sync_button(GHOST_kButtonMaskMiddle,
++                is_wacom ? AMOTION_EVENT_BUTTON_STYLUS_PRIMARY | AMOTION_EVENT_BUTTON_SECONDARY :
++                           AMOTION_EVENT_BUTTON_TERTIARY);
+     sync_button(GHOST_kButtonMaskButton4, AMOTION_EVENT_BUTTON_BACK);
+     sync_button(GHOST_kButtonMaskButton5, AMOTION_EVENT_BUTTON_FORWARD);
+ 
+@@ -485,13 +632,13 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
                                                tablet_from_event(event);
    int32_t x = int32_t(ghost_android_scale_input(AMotionEvent_getX(event, 0)));
    int32_t y = int32_t(ghost_android_scale_input(AMotionEvent_getY(event, 0)));
@@ -618,7 +690,61 @@ index ae9cf24..ec49ffc 100644
  
    /* A pointer that leaves proximity simply stops sending events, so reporting its last
     * position keeps the button under it highlighted and its tooltip on screen forever.
-@@ -595,20 +718,7 @@ void GHOST_SystemAndroid::touchSendShift(bool down)
+    * Park it outside the window instead, which is what actually happened. Not while a
+    * button is held, so losing range mid-drag doesn't fling the cursor. */
+-  if (hover_exit && !touch_button_down_ && !stylus_button_down_) {
++  if (hover_exit && !touch_button_down_ && !stylus_button_down_ &&
++      !stylus_middle_button_down_) {
+     hover_exit_pending_ = true;
+     hover_exit_time_ = getMilliSeconds();
+   }
+@@ -504,18 +651,33 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
+   pushEvent(std::make_unique<GHOST_EventCursor>(
+       getMilliSeconds(), GHOST_kEventCursorMove, window_, x, y, tablet));
+ 
+-  /* S Pen side button: independent right-click, in hover or contact. */
+-  const bool side = (AMotionEvent_getButtonState(event) &
+-                     AMOTION_EVENT_BUTTON_STYLUS_PRIMARY) != 0;
+-  if (side != stylus_button_down_) {
+-    stylus_button_down_ = side;
+-    buttons_.set(GHOST_kButtonMaskRight, side);
+-    pushEvent(std::make_unique<GHOST_EventButton>(
+-        getMilliSeconds(),
+-        side ? GHOST_kEventButtonDown : GHOST_kEventButtonUp,
+-        window_,
+-        GHOST_kButtonMaskRight,
+-        tablet));
++  /* Intuos S: lower side button is middle-click, upper is right-click. Android
++   * stylus and legacy pointer masks are accepted for this specific device.
++   * Other pens, including S Pen, retain their primary side-button right-click. */
++  if (is_pen) {
++    const auto sync_side_button = [&](bool &was_down,
++                                      const GHOST_TButton mask,
++                                      const bool down) {
++      if (was_down != down) {
++        was_down = down;
++        buttons_.set(mask, down);
++        pushEvent(std::make_unique<GHOST_EventButton>(
++            getMilliSeconds(),
++            down ? GHOST_kEventButtonDown : GHOST_kEventButtonUp,
++            window_,
++            mask,
++            tablet));
++      }
++    };
++    const int32_t right_mask = is_wacom ?
++                                  AMOTION_EVENT_BUTTON_STYLUS_SECONDARY |
++                                      AMOTION_EVENT_BUTTON_TERTIARY :
++                                  AMOTION_EVENT_BUTTON_STYLUS_PRIMARY;
++    sync_side_button(stylus_button_down_, GHOST_kButtonMaskRight,
++                     (button_state & right_mask) != 0);
++    sync_side_button(stylus_middle_button_down_, GHOST_kButtonMaskMiddle,
++                     is_wacom && (button_state & (AMOTION_EVENT_BUTTON_STYLUS_PRIMARY |
++                                                   AMOTION_EVENT_BUTTON_SECONDARY)) != 0);
+   }
+ 
+   /* A stylus has its own buttons, so its tip maps straight to the left button.
+@@ -595,20 +757,7 @@ void GHOST_SystemAndroid::touchSendShift(bool down)
      return;
    }
    touch_shift_active_ = down;
@@ -640,7 +766,17 @@ index ae9cf24..ec49ffc 100644
  }
  
  void GHOST_SystemAndroid::touchEndPan()
-@@ -676,7 +786,51 @@ static GHOST_TKey convertAndroidKey(int32_t keycode)
+@@ -628,7 +777,8 @@ void GHOST_SystemAndroid::hoverExitCheck()
+   /* Long enough that a touch-down always arrives first, short enough that a
+    * tooltip does not outlive the stylus by anything noticeable. */
+   const uint64_t park_delay_ms = 100;
+-  if (!hover_exit_pending_ || touch_button_down_ || stylus_button_down_) {
++  if (!hover_exit_pending_ || touch_button_down_ || stylus_button_down_ ||
++      stylus_middle_button_down_) {
+     return;
+   }
+   if (getMilliSeconds() - hover_exit_time_ < park_delay_ms) {
+@@ -676,7 +826,51 @@ static GHOST_TKey convertAndroidKey(int32_t keycode)
    if (keycode >= AKEYCODE_0 && keycode <= AKEYCODE_9) {
      return GHOST_TKey(GHOST_kKey0 + (keycode - AKEYCODE_0));
    }
@@ -692,7 +828,7 @@ index ae9cf24..ec49ffc 100644
      case AKEYCODE_SPACE:
        return GHOST_kKeySpace;
      case AKEYCODE_ENTER:
-@@ -698,25 +852,164 @@ static GHOST_TKey convertAndroidKey(int32_t keycode)
+@@ -698,25 +892,164 @@ static GHOST_TKey convertAndroidKey(int32_t keycode)
        return GHOST_kKeyUpArrow;
      case AKEYCODE_DPAD_DOWN:
        return GHOST_kKeyDownArrow;
@@ -865,7 +1001,7 @@ index ae9cf24..ec49ffc 100644
  /* Byte length of the UTF-8 character starting at a lead byte. */
  static int utf8_char_len(unsigned char lead)
  {
-@@ -741,32 +1034,54 @@ void GHOST_SystemAndroid::handleTextInput(const char *utf8_string)
+@@ -741,32 +1074,54 @@ void GHOST_SystemAndroid::handleTextInput(const char *utf8_string)
      return;
    }
    std::scoped_lock lock(java_input_mutex_);
@@ -873,26 +1009,26 @@ index ae9cf24..ec49ffc 100644
 +  if (java_input_enabled_) {
 +    java_input_.push_back({JavaInputEvent::Type::Text, utf8_string});
 +  }
- }
- 
--void GHOST_SystemAndroid::handleJavaKeyEvent(int32_t keycode, int32_t action, int32_t meta_state)
++}
++
 +void GHOST_SystemAndroid::handleJavaKeyEvent(int32_t keycode,
 +                                            int32_t action,
 +                                            int32_t meta_state,
 +                                            int32_t unicode,
 +                                            int32_t repeat_count)
- {
-   std::scoped_lock lock(java_input_mutex_);
--  java_keys_.push_back({keycode, action, meta_state});
++{
++  std::scoped_lock lock(java_input_mutex_);
 +  if (java_input_enabled_) {
 +    java_input_.push_back(
 +        {JavaInputEvent::Type::Key, {}, keycode, action, meta_state, unicode, repeat_count});
 +  }
-+}
-+
+ }
+ 
+-void GHOST_SystemAndroid::handleJavaKeyEvent(int32_t keycode, int32_t action, int32_t meta_state)
 +void GHOST_SystemAndroid::handleKeyboardDisconnected()
-+{
-+  std::scoped_lock lock(java_input_mutex_);
+ {
+   std::scoped_lock lock(java_input_mutex_);
+-  java_keys_.push_back({keycode, action, meta_state});
 +  if (java_input_enabled_) {
 +    java_input_.push_back({JavaInputEvent::Type::KeyboardDisconnected, {}});
 +  }
@@ -935,7 +1071,7 @@ index ae9cf24..ec49ffc 100644
    }
  }
  
-@@ -804,35 +1119,35 @@ void GHOST_SystemAndroid::dispatchTextInput(const char *utf8_string)
+@@ -804,35 +1159,35 @@ void GHOST_SystemAndroid::dispatchTextInput(const char *utf8_string)
    }
  }
  
@@ -991,7 +1127,7 @@ index ae9cf24..ec49ffc 100644
    return GHOST_kSuccess;
  }
  
-@@ -863,6 +1178,60 @@ static JNIEnv *android_jni_env(android_app *app)
+@@ -863,6 +1218,86 @@ static JNIEnv *android_jni_env(android_app *app)
    return vm->AttachCurrentThread(&env, nullptr) == JNI_OK ? env : nullptr;
  }
  
@@ -1049,11 +1185,37 @@ index ae9cf24..ec49ffc 100644
 +  return composed;
 +}
 +
++/* Limit the customized pen mapping to the USB identities checked by Java. */
++static bool android_is_wacom_intuos_s(android_app *app, int32_t device_id)
++{
++  JNIEnv *env = android_jni_env(app);
++  if (!env || !app->activity->clazz) {
++    return false;
++  }
++  jobject activity = app->activity->clazz;
++  jclass activity_class = env->GetObjectClass(activity);
++  if (!activity_class) {
++    env->ExceptionClear();
++    return false;
++  }
++  jmethodID method = env->GetMethodID(activity_class, "isWacomIntuosS", "(I)Z");
++  bool is_wacom = false;
++  if (method) {
++    is_wacom = env->CallBooleanMethod(activity, method, device_id) == JNI_TRUE;
++  }
++  if (env->ExceptionCheck()) {
++    env->ExceptionClear();
++    is_wacom = false;
++  }
++  env->DeleteLocalRef(activity_class);
++  return is_wacom;
++}
++
  /* Fetch the ClipboardManager for the activity, or null. */
  static jobject android_clipboard_manager(JNIEnv *env, jobject activity)
  {
 diff --git a/intern/ghost/intern/GHOST_SystemAndroid.hh b/intern/ghost/intern/GHOST_SystemAndroid.hh
-index c04d0dd..e8ddc78 100644
+index c04d0dd..df8adf0 100644
 --- a/intern/ghost/intern/GHOST_SystemAndroid.hh
 +++ b/intern/ghost/intern/GHOST_SystemAndroid.hh
 @@ -57,8 +57,7 @@ class GHOST_SystemAndroid : public GHOST_System {
@@ -1097,7 +1259,7 @@ index c04d0dd..e8ddc78 100644
  
    android_app *app_;
    GHOST_WindowAndroid *window_;
-@@ -101,6 +114,12 @@ class GHOST_SystemAndroid : public GHOST_System {
+@@ -101,10 +114,17 @@ class GHOST_SystemAndroid : public GHOST_System {
    /* Input state tracked from events for the out-of-queue queries. */
    GHOST_Buttons buttons_;
    int32_t meta_state_;
@@ -1109,8 +1271,14 @@ index c04d0dd..e8ddc78 100644
 +  bool input_focused_ = true;
    int32_t cursor_x_, cursor_y_;
  
-   /* S Pen side button, tracked so it works while hovering or touching. */
-@@ -122,10 +141,7 @@ class GHOST_SystemAndroid : public GHOST_System {
+-  /* S Pen side button, tracked so it works while hovering or touching. */
++  /* Pen side buttons are independent of tip contact, including while hovering. */
+   bool stylus_button_down_;
++  bool stylus_middle_button_down_ = false;
+ 
+   /* Two-finger gesture tracking (pan/pinch), computed from raw pointers. */
+   bool gesture_active_;
+@@ -122,10 +142,7 @@ class GHOST_SystemAndroid : public GHOST_System {
     * to a rotate), and one-finger drags stay available to Blender's buttons, sliders and editor
     * borders. */
    bool touch_pan_active_;
@@ -1122,7 +1290,7 @@ index c04d0dd..e8ddc78 100644
    bool touch_shift_active_;
  
    /* Finger touch: the button is decided after the press, so that holding still
-@@ -134,7 +150,7 @@ class GHOST_SystemAndroid : public GHOST_System {
+@@ -134,7 +151,7 @@ class GHOST_SystemAndroid : public GHOST_System {
    /* Parks the cursor once a stylus has really left, see hover_exit_pending_. */
    void hoverExitCheck();
    void touchSendButton(GHOST_TButton mask, GHOST_TEventType type);
@@ -1131,7 +1299,7 @@ index c04d0dd..e8ddc78 100644
    void touchSendShift(bool down);
    /* Release the three-finger pan, if one is running. */
    void touchEndPan();
-@@ -159,13 +175,22 @@ class GHOST_SystemAndroid : public GHOST_System {
+@@ -159,13 +176,22 @@ class GHOST_SystemAndroid : public GHOST_System {
    /* The Java IME callbacks run on the Android UI thread, while the event queue
     * is only safe to touch from Blender's thread, so they are queued and drained
     * in processEvents(). */

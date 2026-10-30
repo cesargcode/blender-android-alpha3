@@ -1,4 +1,4 @@
-# Blender Android Alpha 3: modificadores e digitação física
+# Blender Android Alpha 3: modificadores, texto e Wacom CTL-4100
 
 Patch experimental para `simfeo/blender`, tag `android-alpha-3`, commit
 `89479ec817bfe9411ae6ef6f35392d5450e1ad0b`. Corrige a entrega de Shift/Ctrl/Alt/Meta,
@@ -6,8 +6,23 @@ a coexistência dos modificadores físicos e virtuais, a limpeza após perda de
 foco ou desconexão e a entrega de texto do teclado físico aos campos do Blender.
 Mantém a configuração Full e a base gráfica.
 
-**APK Full compilado, inspecionado e assinado em 28/10/2026. O funcionamento no
-aparelho ainda não foi testado.** O instalador entregue localmente, separado
+**Revisão Wacom em 30/10/2026: compilação Android e novo APK pendentes.**
+O remapeamento se aplica à CTL-4100 com VID `0x056a` ou `0x2d1f` e PID `0x0374`:
+ponta → botão esquerdo, botão inferior da caneta → central, superior → direito.
+A S Pen mantém botão primário → direito; o mouse comum mantém seu mapeamento.
+A suíte nativa passou em **1.088 verificações** (629 anteriores e 459 de movimento),
+e passaram **83 Java e 6 JNI**. Com as **45 do teclado virtual mantido**, já
+aprovadas, são **1.222 verificações locais**. A preparação final do pacote
+reexecuta todas as suítes sobre as fontes entregues.
+O novo comportamento ainda não foi testado no aparelho.
+
+Nome previsto: `blender-alpha3-modificadores-wacom-full-arm64-signed.apk`, com a
+mesma identidade de assinatura do APK anterior. Esse novo arquivo ainda não foi
+produzido. O APK de 28/10 permanece preservado e não contém a correção Wacom.
+
+Os resultados a seguir são **históricos, somente da versão de 28/10**.
+
+**APK anterior Full compilado, inspecionado e assinado em 28/10/2026.** O instalador entregue localmente, separado
 do repositório e do draft do GitHub, é
 `blender-alpha3-modificadores-full-arm64-signed.apk`, com 287.065.402 bytes e SHA-256:
 
@@ -23,11 +38,13 @@ ou modificar o conteúdo das entradas originais. O pacote completo passou em
 610 verificações estáticas, também aprovadas no APK final assinado; a assinatura v3 e o alinhamento com `zipalign -P 16`
 foram verificados. O APK original do GitHub foi preservado e tem hash diferente
 do instalador assinado; seu unsigned não está pronto para instalar. A
-[receita](build/README.md) registra essa distinção.
+[receita](build/README.md) registra essa distinção. No tablet, o usuário relatou
+ponta esquerda, botão inferior direito e superior sem ação nessa versão antiga.
+As demais funções não têm validação completa registrada.
 
 - [Patch](blender-alpha3-modificadores.patch): nove arquivos alterados sobre a base fixada.
 - [Receita de compilação](build/README.md): Ubuntu 24.04 x64, saída unsigned por padrão.
-- [Testes](tests/README.md): 752 verificações locais aprovadas — 629 nativas, 45 do teclado virtual, 72 Java e 6 JNI — com interfaces simuladas.
+- [Testes](tests/README.md): 1.222 verificações locais, incluindo 459 casos de movimento; resultados anteriores separados.
 - [Capacidade](CAPACIDADE.md): medições de fontes, bibliotecas e NDK, com limites conhecidos.
 - [Licença](LICENSE): texto GPL fornecido pelo projeto original.
 

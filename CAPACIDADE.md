@@ -1,8 +1,26 @@
 # Capacidade para compilar no GitHub Actions
 
-Avaliação em 28/10/2026 da base `89479ec817bfe9411ae6ef6f35392d5450e1ad0b` (Android Alpha 3, Full).
+Atualização em 30/10/2026: **novo build Full da revisão Wacom pendente**.
+A base continua `89479ec817bfe9411ae6ef6f35392d5450e1ad0b`. A alteração seleciona
+CTL-4100 por VID `0x056a`/`0x2d1f` e PID `0x0374`; a ponta será esquerdo,
+inferior central e superior direito, preservando S Pen primário direito e mouse.
+O APK anterior será mantido; a nova saída assinada prevista é
+`blender-alpha3-modificadores-wacom-full-arm64-signed.apk`.
 
-## Resultado final: compilação Full e envio concluídos na execução 6
+A consulta pública de 30/10 confirmou os três workflows apenas manuais,
+zero caches Actions e zero artifacts do run6. Não foi encontrada uma árvore
+Android de objetos local reutilizável. A nova correção exige recompilação;
+`JOBS=2` no runner público gratuito permanece a escolha já comprovada.
+A duração abaixo é histórica, não uma previsão garantida para o novo build.
+
+A suíte nativa passou em **1.088 verificações** (629 anteriores e 459 de movimento),
+e passaram **83 Java e 6 JNI**. Com as **45 do teclado virtual mantido**, já
+aprovadas, são **1.222 verificações locais**. A preparação final do pacote
+reexecuta todas as suítes sobre as fontes entregues. Esses testes não medem capacidade ou duração do build Android.
+
+Avaliação e medições anteriores de 28/10/2026 (Android Alpha 3, Full, sem Wacom):
+
+## Histórico de 28/10: compilação Full e envio concluídos na execução 6
 
 A [execução 6, 40731216675](https://github.com/cesargcode/blender-android-alpha3/actions/runs/40731216675),
 no commit `90d8bba59bd2594b64293a943186cfe66aef9935`, terminou com **sucesso** no
@@ -23,7 +41,9 @@ localmente, tem 287.065.402 bytes e SHA-256
 `c7aa70e957ec911a738432d6f8b0b74a9f96cc217a46353222496924bc207ea9`.
 O draft contém o unsigned original e não é a entrega desse instalador assinado.
 As 610 verificações estáticas, a assinatura v3 e o alinhamento passaram; o
-funcionamento no aparelho não foi testado. Detalhes no [guia da receita](build/README.md).
+usuário relatou no tablet ponta esquerda, botão inferior direito e superior sem
+ação nessa versão; as demais funções não têm validação ampla registrada.
+Detalhes no [guia da receita](build/README.md).
 
 O runner gratuito com duas tarefas concluiu três compilações Full. Não houve
 necessidade demonstrada de runner pago, cache persistente ou `JOBS=4`. As medições
