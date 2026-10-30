@@ -1,10 +1,42 @@
 # Receita Full ARM64 para Ubuntu 24.04
 
+**Revisão Wacom de 30/10/2026: novo build Android e APK pendentes.**
+O alvo é a CTL-4100 com VID `0x056a` ou `0x2d1f` e PID `0x0374`: ponta → esquerdo,
+inferior → central, superior → direito; S Pen primário → direito e mouse comum
+mantêm o comportamento anterior.
+A suíte nativa passou em **1.088 verificações** (629 anteriores e 459 de movimento),
+e passaram **83 Java e 6 JNI**. Com as **45 do teclado virtual mantido**, já
+aprovadas, são **1.222 verificações locais**. A preparação final do pacote
+reexecuta todas as suítes sobre as fontes entregues.
+
+A receita CI conserva seu nome de saída unsigned. Baixe a nova execução para
+um caminho local distinto e assine como
+`blender-alpha3-modificadores-wacom-full-arm64-signed.apk`, preservando o APK de
+28/10 e reutilizando sua chave existente. Não crie outra identidade de assinatura.
+O certificado esperado tem SHA-256
+`f279022c0af0e318bade44fff5bb33bbdc58497e1fd8282dbba3b0618f93bd73`.
+
+A preparação local do pacote de fontes aceita nome próprio:
+
+```powershell
+python prepare_delivery.py --archive-stem BLENDER_ANDROID_ALPHA3_WACOM_CODIGO
+```
+
+Esse comando pertence ao workspace de desenvolvimento, valida a fonte e gera
+`BLENDER_ANDROID_ALPHA3_WACOM_CODIGO.zip` e seu `.sha256.txt`, preservando o ZIP
+anterior. Inclui `tests/android_motion_assertions.cc` no mesmo harness nativo.
+Ele não compila Android nem produz APK. A receita futura usa o adaptador glTF
+corrigido no modo padrão `SIGN_APK=0`, descrito abaixo.
+
+Os resultados e hashes seguintes são **históricos, da versão de 28/10 sem Wacom**.
+
 **APK final compilado, inspecionado e assinado em 28/10/2026, entregue localmente.**
 O arquivo `blender-alpha3-modificadores-full-arm64-signed.apk` tem 287.065.402 bytes;
 seu SHA-256 é `c7aa70e957ec911a738432d6f8b0b74a9f96cc217a46353222496924bc207ea9`.
 A assinatura v3 e o alinhamento com `zipalign -P 16` foram verificados. O alvo é
-Android 12 ou superior, ARM64; instalação e funcionamento no aparelho não foram testados.
+Android 12 ou superior, ARM64. Nessa versão anterior, o usuário relatou no tablet
+ponta esquerda, botão inferior direito e superior sem ação; a validação ampla
+das demais funções permanece pendente.
 
 A [execução 6](https://github.com/cesargcode/blender-android-alpha3/actions/runs/40731216675),
 no commit da receita `90d8bba59bd2594b64293a943186cfe66aef9935`, terminou com sucesso.
