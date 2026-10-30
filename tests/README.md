@@ -1,4 +1,19 @@
-# Testes das funções de entrada
+# Testes das funções de entrada e da caneta Wacom
+
+**Revisão Wacom de 30/10/2026.** A suíte nativa passou em **1.088 verificações** (629 anteriores e 459 de movimento),
+e passaram **83 Java e 6 JNI**. Com as **45 do teclado virtual mantido**, já
+aprovadas, são **1.222 verificações locais**. A preparação final do pacote
+reexecuta todas as suítes sobre as fontes entregues.
+Build Android Full, novo APK e teste da correção no aparelho pendentes.
+A CTL-4100 selecionada por VID `0x056a`/`0x2d1f` e PID `0x0374` usa ponta esquerda,
+inferior central e superior direito. A S Pen mantém botão primário direito e
+mouse comum mantém seu mapeamento. O APK previsto é
+`blender-alpha3-modificadores-wacom-full-arm64-signed.apk`, ainda não produzido.
+
+`android_motion_assertions.cc` está integrado ao `run_host_tests.py` pela lista
+`additional_assertions`; não exige comando adicional. A função de movimento e
+seus tipos/constantes são extraídos da fonte real; Android/GHOST são simulados.
+Os resultados abaixo pertencem ao snapshot anterior, de **28/10 sem Wacom**.
 
 Os testes extraem funções reais de um checkout Blender com o patch aplicado e
 as compilam com interfaces Android/GHOST/UI simuladas. A validação local usa
@@ -15,9 +30,11 @@ Assinatura v3 e alinhamento com `zipalign -P 16` também passaram.
 O instalador `blender-alpha3-modificadores-full-arm64-signed.apk` é entregue
 localmente; o draft do GitHub contém o unsigned original. Seu hash e a distinção
 entre os artefatos estão no [guia de compilação](../build/README.md).
-**Instalação e funcionamento no aparelho continuam sem teste.**
+No APK anterior, o usuário relatou ponta esquerda, botão inferior direito e
+superior sem ação no tablet. A validação ampla das demais funções e o teste
+do novo remapeamento continuam pendentes.
 
-| Conjunto | Verificações locais aprovadas |
+| Conjunto anterior de 28/10 | Verificações locais aprovadas |
 | --- | ---: |
 | Entrada nativa Android | 629 |
 | Teclado virtual | 45 |
@@ -77,7 +94,7 @@ Ctrl/Meta, AltGr e composição/fallback de acentos. A consulta ao layout e os
 callbacks Android são simulados; os testes comprovam a lógica de encaminhamento.
 
 Conserve todos os arquivos desta pasta juntos: extrator, configuração JSON,
-headers de fixture, casos C++ e scripts. Os headers originais necessários devem
+headers de fixture, casos C++ (incluindo `android_motion_assertions.cc`) e scripts. Os headers originais necessários devem
 existir no checkout selecionado. Saídas geradas, caches e logs não fazem parte
 do repositório; `--generated-dir` permite escolher a pasta temporária do teste
 Java/JNI. Nunca use um registro antigo como evidência de uma fonte posterior.

@@ -3,6 +3,7 @@
 // https://developer.android.com/ndk/reference/group/input
 // https://developer.android.com/reference/android/view/KeyEvent
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -12,6 +13,11 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+// Android's math.h exposes this standard constant; Windows C++17 need not.
+#ifndef M_PI_2
+static constexpr double M_PI_2 = 1.57079632679489661923;
+#endif
 
 enum {
   AKEY_EVENT_ACTION_DOWN = 0,
@@ -87,22 +93,77 @@ enum {
   AMETA_NUM_LOCK_ON = 0x200000,
 };
 
+enum {
+  AINPUT_EVENT_TYPE_KEY = 1, AINPUT_EVENT_TYPE_MOTION = 2,
+  AMOTION_EVENT_ACTION_MASK = 0xff,
+  AMOTION_EVENT_ACTION_DOWN = 0, AMOTION_EVENT_ACTION_UP = 1,
+  AMOTION_EVENT_ACTION_MOVE = 2, AMOTION_EVENT_ACTION_CANCEL = 3,
+  AMOTION_EVENT_ACTION_POINTER_DOWN = 5, AMOTION_EVENT_ACTION_POINTER_UP = 6,
+  AMOTION_EVENT_ACTION_HOVER_MOVE = 7, AMOTION_EVENT_ACTION_SCROLL = 8,
+  AMOTION_EVENT_ACTION_HOVER_ENTER = 9, AMOTION_EVENT_ACTION_HOVER_EXIT = 10,
+  AMOTION_EVENT_ACTION_BUTTON_PRESS = 11, AMOTION_EVENT_ACTION_BUTTON_RELEASE = 12,
+  AMOTION_EVENT_TOOL_TYPE_UNKNOWN = 0, AMOTION_EVENT_TOOL_TYPE_FINGER = 1,
+  AMOTION_EVENT_TOOL_TYPE_STYLUS = 2, AMOTION_EVENT_TOOL_TYPE_MOUSE = 3,
+  AMOTION_EVENT_TOOL_TYPE_ERASER = 4,
+  AMOTION_EVENT_BUTTON_PRIMARY = 1, AMOTION_EVENT_BUTTON_SECONDARY = 2,
+  AMOTION_EVENT_BUTTON_TERTIARY = 4, AMOTION_EVENT_BUTTON_BACK = 8,
+  AMOTION_EVENT_BUTTON_FORWARD = 16, AMOTION_EVENT_BUTTON_STYLUS_PRIMARY = 32,
+  AMOTION_EVENT_BUTTON_STYLUS_SECONDARY = 64,
+  AMOTION_EVENT_AXIS_ORIENTATION = 8, AMOTION_EVENT_AXIS_VSCROLL = 9,
+  AMOTION_EVENT_AXIS_HSCROLL = 10, AMOTION_EVENT_AXIS_TILT = 25,
+};
+struct TestMotionPointer {
+  int32_t tool = AMOTION_EVENT_TOOL_TYPE_STYLUS;
+  float x = 0, y = 0, pressure = 0, tilt = 0, orientation = 0;
+};
 struct AInputEvent {
   int32_t keycode;
   int32_t action;
   int32_t meta_state;
   int32_t repeat = 0;
   int32_t device_id = 4;
+  int32_t type = AINPUT_EVENT_TYPE_KEY;
+  int32_t button_state = 0;
+  std::vector<TestMotionPointer> pointers{};
+  float vscroll = 0, hscroll = 0;
 };
 static int32_t AKeyEvent_getKeyCode(const AInputEvent *e) { return e->keycode; }
 static int32_t AKeyEvent_getAction(const AInputEvent *e) { return e->action; }
 static int32_t AKeyEvent_getMetaState(const AInputEvent *e) { return e->meta_state; }
 static int32_t AKeyEvent_getRepeatCount(const AInputEvent *e) { return e->repeat; }
 static int32_t AInputEvent_getDeviceId(const AInputEvent *e) { return e->device_id; }
+static int32_t AInputEvent_getType(const AInputEvent *e) { return e->type; }
+static int32_t AMotionEvent_getAction(const AInputEvent *e) { return e->action; }
+static size_t AMotionEvent_getPointerCount(const AInputEvent *e) { return e->pointers.size(); }
+static int32_t AMotionEvent_getToolType(const AInputEvent *e, size_t i) { return e->pointers.at(i).tool; }
+static int32_t AMotionEvent_getButtonState(const AInputEvent *e) { return e->button_state; }
+static float AMotionEvent_getX(const AInputEvent *e, size_t i) { return e->pointers.at(i).x; }
+static float AMotionEvent_getY(const AInputEvent *e, size_t i) { return e->pointers.at(i).y; }
+static float AMotionEvent_getPressure(const AInputEvent *e, size_t i) { return e->pointers.at(i).pressure; }
+static float AMotionEvent_getAxisValue(const AInputEvent *e, int32_t axis, size_t i) {
+  switch (axis) {
+    case AMOTION_EVENT_AXIS_TILT: return e->pointers.at(i).tilt;
+    case AMOTION_EVENT_AXIS_ORIENTATION: return e->pointers.at(i).orientation;
+    case AMOTION_EVENT_AXIS_VSCROLL: return e->vscroll;
+    case AMOTION_EVENT_AXIS_HSCROLL: return e->hscroll;
+    default: return 0;
+  }
+}
+// Display scaling and Android device classification are external boundaries.
+static float ghost_android_scale_input(float coordinate) { return coordinate; }
 
 // JNI/Android character-map boundary only: tests provide explicit layout responses.
 // Character selection is never synthesized from a US keyboard table here or in production.
 struct android_app {};
+static std::vector<int32_t> test_wacom_device_ids;
+static int test_device_queries = 0;
+static bool android_is_wacom_intuos_s(android_app *, int32_t device_id) {
+  ++test_device_queries;
+  for (int32_t expected : test_wacom_device_ids) {
+    if (expected == device_id) return true;
+  }
+  return false;
+}
 struct TestKeyCharacter {
   int32_t device_id, keycode, meta_state, unicode;
 };
@@ -204,6 +265,9 @@ enum GHOST_TEventType {
   GHOST_kEventWindowDeactivate,
   GHOST_kEventButtonDown,
   GHOST_kEventButtonUp,
+  GHOST_kEventCursorMove,
+  GHOST_kEventWheel,
+  GHOST_kEventTrackpad,
 };
 enum GHOST_TButton {
   GHOST_kButtonMaskLeft = 1,
@@ -212,8 +276,7 @@ enum GHOST_TButton {
   GHOST_kButtonMaskButton4 = 8,
   GHOST_kButtonMaskButton5 = 16,
 };
-struct GHOST_TabletData {};
-static constexpr GHOST_TabletData GHOST_TABLET_DATA_NONE{};
+// Tablet mode, payload and NONE constant are extracted from the real GHOST header.
 struct GHOST_WindowAndroid {};
 struct GHOST_Buttons {
   unsigned mask = 0;
@@ -232,6 +295,8 @@ struct GHOST_Event {
   bool repeat = false;
   GHOST_TButton button = GHOST_kButtonMaskLeft;
   std::string text;
+  int32_t x = 0, y = 0, delta_x = 0, delta_y = 0;
+  GHOST_TabletData tablet = GHOST_TABLET_DATA_NONE;
   GHOST_Event(uint64_t t, GHOST_TEventType kind, GHOST_WindowAndroid *w)
       : time(t), type(kind), window(w) {}
   virtual ~GHOST_Event() = default;
@@ -254,9 +319,28 @@ struct GHOST_EventButton : GHOST_Event {
                    GHOST_TEventType kind,
                    GHOST_WindowAndroid *w,
                    GHOST_TButton mask,
-                   GHOST_TabletData)
+                   GHOST_TabletData tablet_data)
       : GHOST_Event(t, kind, w) {
     button = mask;
+    tablet = tablet_data;
+  }
+};
+struct GHOST_EventCursor : GHOST_Event {
+  GHOST_EventCursor(uint64_t t, GHOST_TEventType kind, GHOST_WindowAndroid *w,
+                   int32_t px, int32_t py, const GHOST_TabletData &data)
+      : GHOST_Event(t, kind, w) { x = px; y = py; tablet = data; }
+};
+enum GHOST_TEventWheelAxis { GHOST_kEventWheelAxisVertical, GHOST_kEventWheelAxisHorizontal };
+struct GHOST_EventWheel : GHOST_Event {
+  GHOST_EventWheel(uint64_t t, GHOST_WindowAndroid *w, GHOST_TEventWheelAxis, int32_t value)
+      : GHOST_Event(t, GHOST_kEventWheel, w) { delta_y = value; }
+};
+enum GHOST_TTrackpadEventSubTypes { GHOST_kTrackpadEventScroll, GHOST_kTrackpadEventMagnify };
+struct GHOST_EventTrackpad : GHOST_Event {
+  GHOST_EventTrackpad(uint64_t t, GHOST_WindowAndroid *w, GHOST_TTrackpadEventSubTypes,
+                     int32_t px, int32_t py, int32_t dx, int32_t dy, bool)
+      : GHOST_Event(t, GHOST_kEventTrackpad, w) {
+    x = px; y = py; delta_x = dx; delta_y = dy;
   }
 };
 

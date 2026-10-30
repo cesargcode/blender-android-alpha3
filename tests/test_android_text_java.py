@@ -24,6 +24,16 @@ JAVA_TEST = r'''
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
+class InputDevice {
+  static final Map<Integer, InputDevice> devices = new HashMap<>();
+  final int vendor, product;
+  final boolean virtual;
+  InputDevice(int v, int p, boolean isVirtual) { vendor=v; product=p; virtual=isVirtual; }
+  static InputDevice getDevice(int id) { return devices.get(id); }
+  int getVendorId() { return vendor; }
+  int getProductId() { return product; }
+  boolean isVirtual() { return virtual; }
+}
 class KeyCharacterMap {
   static class UnavailableException extends RuntimeException {}
   static int device, key, meta, raw, accent, base, combined;
@@ -70,6 +80,28 @@ public class AndroidTextJavaFixture {
   // EXTRACTED_METHODS
   public static void main(String[] args) {
     AndroidTextJavaFixture f = new AndroidTextJavaFixture();
+    InputDevice.devices.put(8, new InputDevice(0x056a, 0x0374, false));
+    check(f.isWacomIntuosS(8), "CTL-4100 USB identity");
+    InputDevice.devices.put(9, new InputDevice(0x2d1f, 0x0374, false));
+    check(f.isWacomIntuosS(9), "CTL-4100 Android-mode identity");
+    InputDevice.devices.put(10, new InputDevice(0x056a, 0x0376, false));
+    check(!f.isWacomIntuosS(10), "other Wacom model remains unchanged");
+    InputDevice.devices.put(11, new InputDevice(0x2d1f, 0x0375, false));
+    check(!f.isWacomIntuosS(11), "other Android-mode Wacom remains unchanged");
+    InputDevice.devices.put(12, new InputDevice(0x04e8, 0x0374, false));
+    check(!f.isWacomIntuosS(12), "matching product from another vendor rejected");
+    InputDevice.devices.put(13, new InputDevice(0, 0, false));
+    check(!f.isWacomIntuosS(13), "unknown identity is not guessed from a name");
+    InputDevice.devices.put(14, new InputDevice(0x056a, 0x0374, true));
+    check(!f.isWacomIntuosS(14), "virtual device with matching IDs rejected");
+    check(!f.isWacomIntuosS(99), "missing device rejected");
+    InputDevice.devices.remove(8);
+    check(!f.isWacomIntuosS(8), "disconnected CTL-4100 not cached");
+    InputDevice.devices.put(8, new InputDevice(0, 0, false));
+    check(!f.isWacomIntuosS(8), "reused device ID with unknown identity rejected");
+    InputDevice.devices.put(8, new InputDevice(0x2d1f, 0x0374, false));
+    check(f.isWacomIntuosS(8), "reused device ID re-queries current CTL-4100");
+
     KeyCharacterMap.raw = 0x800000b4;
     check(f.getKeyUnicode(8, 75, 0x20002) == 0x800000b4, "dead-key bit preserved");
     check(KeyCharacterMap.device == 8 && KeyCharacterMap.key == 75 &&
@@ -143,7 +175,7 @@ public class AndroidTextJavaFixture {
     check(!f.deleteSurroundingText(-1, 1) && !f.deleteSurroundingText(1, -1),
           "invalid deletion rejected before mutation");
     check(f.keys.isEmpty(), "invalid deletion has no partial effects");
-    System.out.println("PASS: " + checks + " Java text-input assertions (framework doubles)");
+    System.out.println("PASS: " + checks + " Java input/device assertions (framework doubles)");
   }
 }
 '''
@@ -230,7 +262,7 @@ def main() -> None:
     java_paths = [source / "build_files/android" / suffix / "org/blender/blender/BlenderActivity.java"
                   for suffix in ("apk/app/src/main/java", "java")]
     source_text = [path.read_text(encoding="utf-8") for path in java_paths]
-    names = ["getKeyUnicode", "composeKeyAccent", "commitInputText", "forwardImeKeyEvent",
+    names = ["getKeyUnicode", "composeKeyAccent", "isWacomIntuosS", "commitInputText", "forwardImeKeyEvent",
              "commitText", "sendKeyEvent", "deleteSurroundingText"]
     methods = [extract_function(source_text[0], name)[0] for name in names]
     for name, method in zip(names, methods):

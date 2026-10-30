@@ -7,7 +7,8 @@ class GHOST_SystemAndroid {
   android_app test_app_;
   android_app *app_ = &test_app_;
   std::vector<std::unique_ptr<GHOST_Event>> events;
-  uint64_t getMilliSeconds() const { return 1234; }
+  uint64_t test_time_ms = 1234;
+  uint64_t getMilliSeconds() const { return test_time_ms; }
   void pushEvent(std::unique_ptr<GHOST_Event> event) { events.push_back(std::move(event)); }
 
   int32_t meta_state_ = 0;
@@ -20,11 +21,18 @@ class GHOST_SystemAndroid {
   bool touch_pending_ = false;
   bool touch_button_down_ = false;
   bool stylus_button_down_ = false;
+  bool stylus_middle_button_down_ = false;
   bool gesture_active_ = false;
   bool hover_exit_pending_ = false;
   GHOST_TButton touch_button_ = GHOST_kButtonMaskLeft;
-  GHOST_TabletData touch_tablet_;
+  GHOST_TabletData touch_tablet_ = GHOST_TABLET_DATA_NONE;
   GHOST_Buttons buttons_;
+  int32_t cursor_x_ = 0, cursor_y_ = 0, touch_down_x_ = 0, touch_down_y_ = 0;
+  uint64_t hover_exit_time_ = 0, touch_down_time_ = 0;
+  float gesture_prev_x_ = 0, gesture_prev_y_ = 0, gesture_prev_dist_ = 0;
+  float gesture_start_x_ = 0, gesture_start_y_ = 0, gesture_start_dist_ = 0;
+  enum class GestureKind { Undecided, Pan, Zoom };
+  GestureKind gesture_kind_ = GestureKind::Undecided;
 
   struct JavaInputEvent {
     enum class Type { Text, Key, KeyboardDisconnected };
@@ -45,10 +53,15 @@ class GHOST_SystemAndroid {
   void touchEndPan();
   void touchCancelPending();
   void handleWindowFocus(bool gained);
+  int32_t handleInputEvent(AInputEvent *event);
+  int32_t handleMotionEvent(AInputEvent *event);
+  void hoverExitCheck();
+  void touchLongPressCheck();
   int32_t handleKeyEvent(AInputEvent *event);
   int32_t dispatchKeyEvent(int32_t keycode, int32_t action, int32_t meta_state,
                            int32_t unicode, int32_t repeat_count, int32_t device_id);
   GHOST_TSuccess getModifierKeys(GHOST_ModifierKeys &keys) const;
+  GHOST_TSuccess getButtons(GHOST_Buttons &buttons) const;
   void handleTextInput(const char *utf8_string);
   void handleJavaKeyEvent(int32_t keycode, int32_t action, int32_t meta_state,
                           int32_t unicode, int32_t repeat_count);

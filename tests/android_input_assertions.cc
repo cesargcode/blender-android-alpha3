@@ -426,6 +426,7 @@ int main() {
   physical_text_and_numeric_keys();
   unicode_layout_and_shortcuts();
   dead_keys_and_java_unicode_fifo();
+  motion_regressions();
   std::printf("PASS: %d assertions against extracted production C++ functions\n", checks);
   return 0;
 }

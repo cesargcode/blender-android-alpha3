@@ -2,6 +2,8 @@
   "source": "blender-alpha3-source/intern/ghost/intern/GHOST_SystemAndroid.cc",
   "declarations": "android_input_class.hh",
   "assertions": "android_input_assertions.cc",
+  "additional_assertions": ["android_motion_assertions.cc"],
+  "production_constants": ["TOUCH_LONG_PRESS_MS", "TOUCH_SLOP_PX", "TOUCH_LONG_PRESS_MOVE_PX", "GESTURE_DECIDE_PX"],
   "production_declarations": [
     "struct AndroidModifier",
     "static constexpr AndroidModifier android_modifiers[]"
@@ -16,6 +18,12 @@
     "GHOST_SystemAndroid::touchEndPan",
     "GHOST_SystemAndroid::touchCancelPending",
     "GHOST_SystemAndroid::handleWindowFocus",
+    "tablet_from_event",
+    "GHOST_SystemAndroid::handleInputEvent",
+    "GHOST_SystemAndroid::handleMotionEvent",
+    "GHOST_SystemAndroid::hoverExitCheck",
+    "GHOST_SystemAndroid::touchLongPressCheck",
+    "GHOST_SystemAndroid::getButtons",
     "convertAndroidKey",
     "android_unicode_to_utf8",
     "GHOST_SystemAndroid::dispatchKeyEvent",
